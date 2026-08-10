@@ -30,3 +30,7 @@ htmlcov/
 
 # Docker
 pgdata/
+
+# Agent skills (local Cursor/agent tooling)
+.agents/
+skills-lock.json

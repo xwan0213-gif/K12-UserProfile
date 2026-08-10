@@ -34,7 +34,11 @@ docker compose up --build -d
 curl -X POST http://localhost:8000/api/v1/mock/seed/demo
 ```
 
-默认后台账号：`admin` / `admin123`（见 `.env` 的 `SEED_ADMIN_*`）。
+默认后台账号：`admin` / `admin123`（见 `.env` 的 `SEED_ADMIN_*`）。  
+重新 seed 后还可演示：`regional` / `regional123`、`advisor` / `advisor123`。
+
+MVP 开发过程见：`ClassDoc/14-MVP功能开发记录.md`。  
+脚手架搭建过程见：`ClassDoc/13-工程脚手架搭建记录.md`。
 
 ## 目录
 
@@ -46,5 +50,3 @@ deploy/               # docker-compose + nginx
 ClassDoc/             # 需求/设计/流程文档
 docs/                 # 指向 ClassDoc
 ```
-
-脚手架搭建过程与错误记录见：`ClassDoc/13-工程脚手架搭建记录.md`。

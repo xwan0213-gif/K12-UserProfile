@@ -14,6 +14,7 @@ from app.core.models import (
     ChatMessage,
     CsSummary,
     Customer,
+    CustomerTag,
     OrderRecord,
     Org,
     TagDef,
@@ -33,6 +34,7 @@ class MockMessageBody(BaseModel):
     direction: str = "in"
     msg_type: str = "text"
     content: str
+    asr_text: str | None = None
     msg_time: datetime | None = None
 
 
@@ -70,20 +72,32 @@ async def seed_demo(db: DbSession) -> dict[str, Any]:
     db.add_all([admin_user, regional, advisor])
     await db.flush()
 
-    db.add(
-        AdminAccount(
-            user_id=admin_user.id,
-            login_name=settings.seed_admin_login,
-            password_hash=hash_password(settings.seed_admin_password),
-        )
+    db.add_all(
+        [
+            AdminAccount(
+                user_id=admin_user.id,
+                login_name=settings.seed_admin_login,
+                password_hash=hash_password(settings.seed_admin_password),
+            ),
+            AdminAccount(
+                user_id=regional.id,
+                login_name="regional",
+                password_hash=hash_password("regional123"),
+            ),
+            AdminAccount(
+                user_id=advisor.id,
+                login_name="advisor",
+                password_hash=hash_password("advisor123"),
+            ),
+        ]
     )
 
     tags = [
         TagDef(name="高意向", sort_order=1, sop_text="48h 内邀约试听"),
         TagDef(name="数学薄弱", sort_order=2, sop_text="推荐数学诊断"),
-        TagDef(name="初中", sort_order=3),
+        TagDef(name="初中", sort_order=3, sop_text="按初中学段话术跟进"),
         TagDef(name="刚加微信", sort_order=4),
-        TagDef(name="近期决策", sort_order=5),
+        TagDef(name="近期决策", sort_order=5, sop_text="24h 内确认试听时间"),
     ]
     db.add_all(tags)
     await db.flush()
@@ -102,6 +116,17 @@ async def seed_demo(db: DbSession) -> dict[str, Any]:
     db.add(customer)
     await db.flush()
 
+    # bind demo tags: 高意向 / 数学薄弱 / 初中
+    for tag in tags[:3]:
+        db.add(
+            CustomerTag(
+                customer_id=customer.id,
+                tag_id=tag.id,
+                source="manual",
+                created_by=advisor.id,
+            )
+        )
+
     now = _utcnow_naive()
     db.add_all(
         [
@@ -118,6 +143,14 @@ async def seed_demo(db: DbSession) -> dict[str, Any]:
                 direction="out",
                 msg_type="text",
                 content="王女士您好，方便说下孩子目前成绩吗？",
+                msg_time=now,
+                is_mock=True,
+            ),
+            ChatMessage(
+                customer_id=customer.id,
+                direction="in",
+                msg_type="text",
+                content="期中大概70分，想夯实基础，先试听看看老师",
                 msg_time=now,
                 is_mock=True,
             ),
@@ -142,6 +175,11 @@ async def seed_demo(db: DbSession) -> dict[str, Any]:
             "seeded": True,
             "admin_login": settings.seed_admin_login,
             "admin_password": settings.seed_admin_password,
+            "accounts": {
+                "admin": settings.seed_admin_login,
+                "regional": "regional/regional123",
+                "advisor": "advisor/advisor123",
+            },
             "customer_id": customer.id,
             "advisor_id": advisor.id,
             "hint": "Mock token: Bearer mock-<advisor_id>",
@@ -151,12 +189,16 @@ async def seed_demo(db: DbSession) -> dict[str, Any]:
 
 @router.post("/messages")
 async def mock_messages(body: MockMessageBody, db: DbSession) -> dict[str, Any]:
+    msg_time = body.msg_time
+    if msg_time and msg_time.tzinfo is not None:
+        msg_time = msg_time.replace(tzinfo=None)
     row = ChatMessage(
         customer_id=body.customer_id,
         direction=body.direction,
         msg_type=body.msg_type,
         content=body.content,
-        msg_time=body.msg_time or _utcnow_naive(),
+        asr_text=body.asr_text,
+        msg_time=msg_time or _utcnow_naive(),
         is_mock=True,
     )
     db.add(row)

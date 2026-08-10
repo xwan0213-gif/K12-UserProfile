@@ -19,6 +19,7 @@ from app.features.profile.router import router as profile_router
 from app.features.reply.router import router as reply_router
 from app.features.schedule.router import router as schedule_router
 from app.features.tag.router import router as tag_router
+from app.features.wecom.context_router import router as context_router
 from app.features.wecom.router import router as auth_router
 from app.features.wecom.sse_router import router as sse_router
 
@@ -59,9 +60,10 @@ def create_app() -> FastAPI:
 
     @app.get(f"{prefix}/hello")
     async def hello():
-        return ok({"hello": "K12-UserProfile", "phase": "scaffold"})
+        return ok({"hello": "K12-UserProfile", "phase": "mvp"})
 
     app.include_router(auth_router, prefix=prefix)
+    app.include_router(context_router, prefix=prefix)
     app.include_router(sse_router, prefix=prefix)
     app.include_router(profile_router, prefix=prefix)
     app.include_router(tag_router, prefix=prefix)
