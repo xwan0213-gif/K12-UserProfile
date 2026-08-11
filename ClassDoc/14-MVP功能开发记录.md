@@ -43,6 +43,7 @@
 | 3.A.2 | `POST /mock/messages` 支持 `asr_text`；时间 naive UTC | OK |
 | 3.A.3 | `POST /mock/orders` 保留 | OK |
 | 3.A.4 | `PUT /admin/customers/{id}/cs-summary` | OK |
+| 3.A.5 | 多客户 Mock：`GET/POST /mock/customers`、`POST /mock/seed/scenario`；侧边栏 Mock 面板；FakeLLM 按 context 派生（见 `15-多客户Mock演示更改文档.md`） | OK |
 
 演示账号：
 
@@ -168,6 +169,8 @@
 - 时间字段统一 UTC 序列化格式  
 
 下一阶段建议：按 `12` 进入 **阶段 4 MVP 测试 / UAT**，或补前端交互细化。
+
+> **2026-08-11 更新**：已执行阶段 4 系统测试，见 `16-MVP测试报告.md`（30/30 PASS，含真实 DeepSeek）。
 
 ---
 

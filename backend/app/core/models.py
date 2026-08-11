@@ -263,3 +263,41 @@ class AiJob(Base):
     started_at: Mapped[datetime | None] = mapped_column()
     finished_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class Suggestion(Base):
+    __tablename__ = "suggestion"
+    __table_args__ = (
+        Index("idx_suggestion_customer", "customer_id", "type", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("customer.id"), nullable=False
+    )
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scene: Mapped[str | None] = mapped_column(String(16))
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    ai_job_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_by_user: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ScriptTemplate(Base):
+    __tablename__ = "script_template"
+    __table_args__ = (Index("idx_script_scene", "scene", "stage"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    scene: Mapped[str] = mapped_column(String(16), nullable=False)
+    stage: Mapped[str | None] = mapped_column(String(16))
+    title: Mapped[str | None] = mapped_column(String(128))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )

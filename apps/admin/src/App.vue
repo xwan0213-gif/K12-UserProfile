@@ -7,7 +7,7 @@ const loginName = ref('admin')
 const password = ref('admin123')
 const status = ref(token.value ? '已恢复本地 token' : '未登录')
 const me = ref<any>(null)
-const nav = ref<'dashboard' | 'customers' | 'users' | 'orders' | 'tags'>('dashboard')
+const nav = ref<'dashboard' | 'customers' | 'users' | 'orders' | 'tags' | 'scripts' | 'ai'>('dashboard')
 const dashboard = ref<any>(null)
 const customers = ref<any>(null)
 const customerDetail = ref<any>(null)
@@ -15,6 +15,15 @@ const users = ref<any>(null)
 const orders = ref<any>(null)
 const tags = ref<any>(null)
 const tagStats = ref<any>(null)
+const scripts = ref<any>(null)
+const adoption = ref<any>(null)
+const scriptForm = ref({
+  scene: 'sales',
+  stage: 'junior' as string | null,
+  title: '',
+  content: '',
+  enabled: true,
+})
 
 const loggedIn = computed(() => !!token.value)
 
@@ -58,6 +67,29 @@ async function loadNav() {
     tags.value = await api('/admin/tags')
     tagStats.value = await api('/admin/tags/stats')
   }
+  if (nav.value === 'scripts') scripts.value = await api('/admin/script-templates')
+  if (nav.value === 'ai') adoption.value = await api('/admin/ai/adoption?group_by=advisor')
+}
+
+async function createScript() {
+  if (!scriptForm.value.title || !scriptForm.value.content) return
+  const body = {
+    ...scriptForm.value,
+    stage: scriptForm.value.stage || null,
+  }
+  await api('/admin/script-templates', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  scriptForm.value.title = ''
+  scriptForm.value.content = ''
+  scripts.value = await api('/admin/script-templates')
+  status.value = '话术模板已创建'
+}
+
+async function disableScript(id: number) {
+  await api(`/admin/script-templates/${id}`, { method: 'DELETE' })
+  scripts.value = await api('/admin/script-templates')
 }
 
 async function openCustomer(id: number) {
@@ -103,6 +135,8 @@ function logout() {
         <button type="button" :class="{ active: nav === 'users' }" @click="switchNav('users')">员工</button>
         <button type="button" :class="{ active: nav === 'orders' }" @click="switchNav('orders')">订单</button>
         <button type="button" :class="{ active: nav === 'tags' }" @click="switchNav('tags')">标签</button>
+        <button type="button" :class="{ active: nav === 'scripts' }" @click="switchNav('scripts')">话术模板</button>
+        <button type="button" :class="{ active: nav === 'ai' }" @click="switchNav('ai')">AI 分析</button>
       </nav>
 
       <section v-if="nav === 'dashboard' && dashboard" class="card">
@@ -201,6 +235,70 @@ function logout() {
           </li>
         </ul>
       </section>
+
+      <section v-if="nav === 'scripts'" class="card">
+        <h2>话术模板</h2>
+        <form class="form wide" @submit.prevent="createScript">
+          <label>场景
+            <select v-model="scriptForm.scene">
+              <option value="sales">sales</option>
+              <option value="cs">cs</option>
+            </select>
+          </label>
+          <label>学段
+            <select v-model="scriptForm.stage">
+              <option value="primary">primary</option>
+              <option value="junior">junior</option>
+              <option value="senior">senior</option>
+              <option :value="null">通用</option>
+            </select>
+          </label>
+          <label>标题 <input v-model="scriptForm.title" /></label>
+          <label>正文 <textarea v-model="scriptForm.content" rows="3" /></label>
+          <button type="submit">新增模板</button>
+        </form>
+        <table>
+          <thead><tr><th>场景</th><th>学段</th><th>标题</th><th>启用</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="s in scripts?.items || []" :key="s.id">
+              <td>{{ s.scene }}</td>
+              <td>{{ s.stage || '通用' }}</td>
+              <td>{{ s.title }}</td>
+              <td>{{ s.enabled }}</td>
+              <td>
+                <button v-if="s.enabled" type="button" @click="disableScript(s.id)">停用</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted">批量导入：python data/seed/import_seed_data.py --base-url http://localhost:18000/api/v1</p>
+      </section>
+
+      <section v-if="nav === 'ai'" class="card">
+        <h2>AI 使用分析（采纳率）</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>顾问</th><th>曝光</th><th>复制</th><th>采纳</th><th>编辑采纳</th><th>拒绝</th>
+              <th>标签确认</th><th>标签拒绝</th><th>采纳率</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, i) in adoption?.items || []" :key="i">
+              <td>{{ row.name }}</td>
+              <td>{{ row.impressions }}</td>
+              <td>{{ row.copy }}</td>
+              <td>{{ row.adopt }}</td>
+              <td>{{ row.edit_adopt }}</td>
+              <td>{{ row.reject }}</td>
+              <td>{{ row.tag_confirm }}</td>
+              <td>{{ row.tag_reject }}</td>
+              <td>{{ row.adoption_rate ?? '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted">口径来自 event_log + suggestion 曝光；二期埋点：reply_* / tag_recommend_*</p>
+      </section>
     </template>
   </main>
 </template>
@@ -224,11 +322,13 @@ h1 { margin: 0; font-size: 1.4rem; }
   padding: 14px;
 }
 .form { display: grid; gap: 10px; max-width: 360px; }
+.form.wide { max-width: 640px; }
 label { display: grid; gap: 4px; }
-input {
+input, select, textarea {
   border: 1px solid #d0d5dd;
   border-radius: 8px;
   padding: 8px 10px;
+  font: inherit;
 }
 .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .tabs button, button {

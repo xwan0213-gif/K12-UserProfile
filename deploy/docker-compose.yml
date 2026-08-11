@@ -24,13 +24,14 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/profile_rec
       MOCK_WECOM: "true"
-      MOCK_LLM: "true"
+      MOCK_LLM: "false" # when true, the LLM will be mocked and the LLM_BASE_URL and LLM_MODEL will be ignored
       LLM_PROVIDER: deepseek
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      # Host 8000 is often blocked on Windows (Hyper-V excluded ranges e.g. 7904-8003).
+      - "18000:8000"
 
   nginx:
     image: nginx:1.27-alpine

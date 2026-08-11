@@ -25,13 +25,15 @@ docker compose up --build -d
 |------|-----|
 | 侧边栏壳 | http://localhost:8080/ |
 | 管理后台壳 | http://localhost:8080/admin/ |
-| API 文档 | http://localhost:8000/docs |
-| Health | http://localhost:8000/health |
+| API 文档 | http://localhost:18000/docs |
+| Health | http://localhost:18000/health |
+
+> 宿主机 API 映射为 **18000→容器 8000**（Windows 上 8000 常被 Hyper-V 保留端口占用）。
 
 首次种子数据：
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/mock/seed/demo
+curl -X POST http://localhost:18000/api/v1/mock/seed/demo
 ```
 
 默认后台账号：`admin` / `admin123`（见 `.env` 的 `SEED_ADMIN_*`）。  

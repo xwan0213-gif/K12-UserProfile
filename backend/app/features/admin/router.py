@@ -15,9 +15,12 @@ from app.core.models import (
     Customer,
     CustomerProfile,
     CustomerTag,
+    EventLog,
     OrderRecord,
     Org,
     ProfileDraft,
+    ScriptTemplate,
+    Suggestion,
     TagDef,
 )
 from app.core.paging import clamp_page, page_meta, require_roles
@@ -649,6 +652,232 @@ async def patch_tag(
         setattr(row, k, v)
     await db.commit()
     return ok({"id": row.id})
+
+
+# ---------- Script templates ----------
+
+
+class ScriptTemplateCreate(BaseModel):
+    scene: str
+    stage: str | None = None
+    title: str | None = None
+    content: str
+    enabled: bool = True
+
+
+class ScriptTemplatePatch(BaseModel):
+    scene: str | None = None
+    stage: str | None = None
+    title: str | None = None
+    content: str | None = None
+    enabled: bool | None = None
+
+
+def _serialize_script(t: ScriptTemplate) -> dict[str, Any]:
+    return {
+        "id": t.id,
+        "scene": t.scene,
+        "stage": t.stage,
+        "title": t.title,
+        "content": t.content,
+        "enabled": t.enabled,
+        "created_at": t.created_at.isoformat() + "Z" if t.created_at else None,
+        "updated_at": t.updated_at.isoformat() + "Z" if t.updated_at else None,
+    }
+
+
+@router.get("/script-templates")
+async def list_script_templates(
+    user: CurrentUser,
+    db: DbSession,
+    scene: str | None = None,
+    stage: str | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    require_roles(user, "admin", "regional", "advisor")
+    q = select(ScriptTemplate)
+    if scene:
+        q = q.where(ScriptTemplate.scene == scene)
+    if stage is not None:
+        q = q.where(ScriptTemplate.stage == stage) if stage else q.where(
+            ScriptTemplate.stage.is_(None)
+        )
+    if enabled is not None:
+        q = q.where(ScriptTemplate.enabled.is_(enabled))
+    rows = (
+        await db.execute(q.order_by(ScriptTemplate.scene, ScriptTemplate.id))
+    ).scalars().all()
+    return ok({"items": [_serialize_script(t) for t in rows]})
+
+
+@router.post("/script-templates")
+async def create_script_template(
+    body: ScriptTemplateCreate, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    require_roles(user, "admin", "regional")
+    if body.scene not in ("sales", "cs"):
+        raise AppError(ErrorCode.PARAM, "scene 须为 sales/cs", http_status=400)
+    if body.stage is not None and body.stage not in ("primary", "junior", "senior"):
+        raise AppError(ErrorCode.PARAM, "无效 stage", http_status=400)
+    row = ScriptTemplate(
+        scene=body.scene,
+        stage=body.stage,
+        title=body.title,
+        content=body.content,
+        enabled=body.enabled,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return ok({"id": row.id})
+
+
+@router.patch("/script-templates/{template_id}")
+async def patch_script_template(
+    template_id: int, body: ScriptTemplatePatch, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    require_roles(user, "admin", "regional")
+    row = await db.get(ScriptTemplate, template_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "话术模板不存在", http_status=404)
+    data = body.model_dump(exclude_unset=True)
+    if "scene" in data and data["scene"] not in ("sales", "cs"):
+        raise AppError(ErrorCode.PARAM, "scene 须为 sales/cs", http_status=400)
+    if "stage" in data and data["stage"] is not None and data["stage"] not in (
+        "primary",
+        "junior",
+        "senior",
+    ):
+        raise AppError(ErrorCode.PARAM, "无效 stage", http_status=400)
+    for k, v in data.items():
+        setattr(row, k, v)
+    await db.commit()
+    return ok({"id": row.id})
+
+
+@router.delete("/script-templates/{template_id}")
+async def disable_script_template(
+    template_id: int, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    """Soft disable via enabled=false."""
+    require_roles(user, "admin", "regional")
+    row = await db.get(ScriptTemplate, template_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "话术模板不存在", http_status=404)
+    row.enabled = False
+    await db.commit()
+    return ok({"id": row.id, "enabled": False})
+
+
+# ---------- AI adoption ----------
+
+_ADOPTION_ACTIONS = (
+    "reply_copy",
+    "reply_adopt",
+    "reply_reject",
+    "reply_edit_adopt",
+    "tag_recommend_confirm",
+    "tag_recommend_reject",
+    "tag_recommend_adopt",
+)
+
+
+@router.get("/ai/adoption")
+async def ai_adoption(
+    user: CurrentUser,
+    db: DbSession,
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = None,
+    org_id: int | None = None,
+    group_by: str | None = Query(default="advisor"),
+) -> dict[str, Any]:
+    require_roles(user, "admin", "regional")
+
+    advisor_q = select(AppUser).where(
+        AppUser.role == "advisor", AppUser.deleted_at.is_(None)
+    )
+    if user["role"] == "regional" and user.get("org_id"):
+        advisor_q = advisor_q.where(AppUser.org_id == user["org_id"])
+    if org_id is not None:
+        if user["role"] != "admin":
+            raise AppError(ErrorCode.FORBIDDEN, "仅超管可按 org_id 筛选", http_status=403)
+        advisor_q = advisor_q.where(AppUser.org_id == org_id)
+    advisors = {u.id: u for u in (await db.execute(advisor_q)).scalars().all()}
+    advisor_ids = list(advisors.keys()) or [-1]
+
+    q = select(EventLog).where(
+        EventLog.action.in_(_ADOPTION_ACTIONS),
+        EventLog.user_id.in_(advisor_ids),
+    )
+    if from_:
+        start = from_.replace(tzinfo=None) if from_.tzinfo else from_
+        q = q.where(EventLog.created_at >= start)
+    if to:
+        end = to.replace(tzinfo=None) if to.tzinfo else to
+        q = q.where(EventLog.created_at <= end)
+    events = (await db.execute(q)).scalars().all()
+
+    shown_q = select(Suggestion).where(
+        Suggestion.status.in_(("shown", "adopted", "rejected", "edit_adopted")),
+        Suggestion.created_by_user.in_(advisor_ids),
+    )
+    if from_:
+        start = from_.replace(tzinfo=None) if from_.tzinfo else from_
+        shown_q = shown_q.where(Suggestion.created_at >= start)
+    if to:
+        end = to.replace(tzinfo=None) if to.tzinfo else to
+        shown_q = shown_q.where(Suggestion.created_at <= end)
+    shown_rows = (await db.execute(shown_q)).scalars().all()
+
+    buckets: dict[tuple[Any, ...], dict[str, Any]] = {}
+
+    def _ensure(user_id: int | None, day: str | None) -> dict[str, Any]:
+        key: tuple[Any, ...] = (user_id, day) if group_by == "day" else (user_id,)
+        if key not in buckets:
+            adv = advisors.get(user_id) if user_id else None
+            buckets[key] = {
+                "user_id": user_id,
+                "name": adv.name if adv else "unknown",
+                "impressions": 0,
+                "adopt": 0,
+                "reject": 0,
+                "edit_adopt": 0,
+                "copy": 0,
+                "tag_confirm": 0,
+                "tag_reject": 0,
+                "day": day if group_by == "day" else None,
+            }
+        return buckets[key]
+
+    for e in events:
+        day = e.created_at.date().isoformat() if e.created_at else None
+        b = _ensure(e.user_id, day)
+        if e.action == "reply_copy":
+            b["copy"] += 1
+        elif e.action == "reply_adopt":
+            b["adopt"] += 1
+        elif e.action == "reply_reject":
+            b["reject"] += 1
+        elif e.action == "reply_edit_adopt":
+            b["edit_adopt"] += 1
+        elif e.action in ("tag_recommend_confirm", "tag_recommend_adopt"):
+            b["tag_confirm"] += 1
+        elif e.action == "tag_recommend_reject":
+            b["tag_reject"] += 1
+
+    for s in shown_rows:
+        day = s.created_at.date().isoformat() if s.created_at else None
+        _ensure(s.created_by_user, day)["impressions"] += 1
+
+    items = []
+    for b in buckets.values():
+        denom = b["adopt"] + b["edit_adopt"] + b["reject"]
+        b["adoption_rate"] = (
+            round((b["adopt"] + b["edit_adopt"]) / denom, 4) if denom else 0.0
+        )
+        items.append(b)
+    items.sort(key=lambda x: (-(x["adopt"] + x["edit_adopt"]), x["user_id"] or 0))
+    return ok({"items": items, "group_by": group_by or "advisor"})
 
 
 # ---------- Dashboard ----------

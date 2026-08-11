@@ -5,10 +5,17 @@ const apiBase = '/api/v1'
 const status = ref('idle')
 const token = ref('')
 const customerId = ref<number | null>(null)
+const externalUserId = ref('demo_wang')
 const tab = ref<'profile' | 'tags' | 'suggest' | 'schedule'>('profile')
 const context = ref<any>(null)
 const profile = ref<any>(null)
 const tags = ref<any>(null)
+const reply = ref<any>(null)
+const replyScene = ref<'sales' | 'cs'>('sales')
+const replyBusy = ref(false)
+const customers = ref<any[]>([])
+const mockReply = ref('')
+const mockDirection = ref<'in' | 'out'>('in')
 const sseLog = ref('')
 let sseAbort: AbortController | null = null
 let reconnectTimer: number | null = null
@@ -16,6 +23,7 @@ let reconnectTimer: number | null = null
 const draft = computed(() => profile.value?.draft)
 const confirmed = computed(() => profile.value?.confirmed)
 const generating = computed(() => !!profile.value?.generating)
+const recommendations = computed(() => tags.value?.recommendations)
 
 async function api(path: string, init: RequestInit = {}) {
   const headers: Record<string, string> = {
@@ -29,15 +37,36 @@ async function api(path: string, init: RequestInit = {}) {
   return json.data
 }
 
+async function loadCustomers() {
+  const data = await api('/mock/customers')
+  customers.value = data.items || []
+}
+
 async function exchange() {
   status.value = '换票中…'
   const data = await api('/auth/wecom/exchange', {
     method: 'POST',
-    body: JSON.stringify({ code: 'mock_code', external_userid: 'demo_wang' }),
+    body: JSON.stringify({
+      code: 'mock_code',
+      external_userid: externalUserId.value || undefined,
+    }),
   })
   token.value = data.access_token
-  customerId.value = data.customer_id
+  if (data.customer_id) customerId.value = data.customer_id
   status.value = `已登录：${data.user.name}`
+  await loadCustomers()
+  if (!customerId.value && customers.value.length) {
+    customerId.value = customers.value[0].id
+  }
+  await refreshAll()
+  connectSse()
+}
+
+async function switchCustomer() {
+  if (!customerId.value) return
+  const selected = customers.value.find((c) => c.id === customerId.value)
+  if (selected?.external_id) externalUserId.value = selected.external_id
+  status.value = `已切换客户 #${customerId.value}`
   await refreshAll()
   connectSse()
 }
@@ -48,7 +77,124 @@ async function refreshAll() {
   context.value = await api(`/sidebar/context?${q}`)
   profile.value = await api(`/sidebar/profile?${q}`)
   tags.value = await api(`/sidebar/tags?${q}`)
-  // reuse admin tags list via mock-friendly public isn't available; skip catalog for add
+  reply.value = await api(`/sidebar/reply/latest?${q}&scene=${replyScene.value}`)
+}
+
+async function suggestReply() {
+  if (!customerId.value) return
+  replyBusy.value = true
+  status.value = '生成话术建议…'
+  try {
+    await api('/sidebar/reply/suggest', {
+      method: 'POST',
+      body: JSON.stringify({
+        customer_id: customerId.value,
+        scene: replyScene.value,
+        force: true,
+      }),
+    })
+    reply.value = await api(
+      `/sidebar/reply/latest?customer_id=${customerId.value}&scene=${replyScene.value}`,
+    )
+  } finally {
+    replyBusy.value = false
+  }
+}
+
+async function replyFeedback(action: 'copy' | 'adopt' | 'reject' | 'edit_adopt', text?: string) {
+  if (!reply.value?.suggestion_id) return
+  if (action === 'copy' && reply.value.primary) {
+    try {
+      await navigator.clipboard.writeText(reply.value.primary)
+    } catch {
+      /* clipboard may be blocked */
+    }
+  }
+  await api('/sidebar/reply/feedback', {
+    method: 'POST',
+    body: JSON.stringify({
+      suggestion_id: reply.value.suggestion_id,
+      action,
+      edited_content: action === 'edit_adopt' ? text || reply.value.primary : undefined,
+    }),
+  })
+  status.value =
+    action === 'copy'
+      ? '已复制（请到企微手动发送，系统不代发）'
+      : action === 'reject'
+        ? '已标记不适用'
+        : '已记录采纳'
+  reply.value = await api(
+    `/sidebar/reply/latest?customer_id=${customerId.value}&scene=${replyScene.value}`,
+  )
+}
+
+async function recommendTags() {
+  if (!customerId.value) return
+  status.value = '生成标签推荐…'
+  await api('/sidebar/tags/recommend', {
+    method: 'POST',
+    body: JSON.stringify({ customer_id: customerId.value, force: true }),
+  })
+  tags.value = await api(`/sidebar/tags?customer_id=${customerId.value}`)
+}
+
+async function confirmTagRecommend(apply: boolean) {
+  const rec = recommendations.value
+  if (!rec?.suggestion_id) return
+  await api('/sidebar/tags/recommend/confirm', {
+    method: 'POST',
+    body: JSON.stringify({
+      suggestion_id: rec.suggestion_id,
+      apply_add: apply,
+      apply_remove: apply,
+    }),
+  })
+  status.value = apply ? '已确认标签推荐' : '已忽略标签推荐'
+  await refreshAll()
+}
+
+async function sendMockReply() {
+  if (!customerId.value || !mockReply.value.trim()) return
+  await api('/mock/messages', {
+    method: 'POST',
+    body: JSON.stringify({
+      customer_id: customerId.value,
+      direction: mockDirection.value,
+      content: mockReply.value.trim(),
+    }),
+  })
+  mockReply.value = ''
+  status.value = '已写入模拟回复'
+  await refreshAll()
+}
+
+async function seedPhysicsScenario() {
+  status.value = '写入物理场景…'
+  const data = await api('/mock/seed/scenario', {
+    method: 'POST',
+    body: JSON.stringify({
+      external_id: 'demo_physics',
+      parent_name: '赵女士',
+      student_name: '赵一凡',
+      grade: '高一',
+      school: '市一中',
+      stage: 'senior',
+      append_messages: false,
+      cs_summary: '关注高一物理一对一，价格敏感。',
+      messages: [
+        { direction: 'in', content: '孩子高一物理跟不上，想问有没有一对一' },
+        { direction: 'out', content: '方便说下最近考试分数吗？' },
+        { direction: 'in', content: '期中物理 58，想先试听，价格别太贵' },
+      ],
+    }),
+  })
+  await loadCustomers()
+  customerId.value = data.customer_id
+  externalUserId.value = data.external_id || 'demo_physics'
+  status.value = `场景就绪：客户 #${data.customer_id}`
+  await refreshAll()
+  connectSse()
 }
 
 async function generate() {
@@ -125,9 +271,16 @@ function connectSse() {
           const dataLine = part.split('\n').find((l) => l.startsWith('data:'))
           const data = dataLine ? dataLine.slice(5).trim() : ''
           sseLog.value = `${ev}: ${data}`
-          if (ev === 'profile_draft' || ev === 'job_failed') {
+          if (ev === 'profile_draft' || ev === 'job_failed' || ev === 'reply_ready' || ev === 'tag_recommend') {
             await refreshAll()
-            status.value = ev === 'profile_draft' ? '收到画像草稿' : '生成失败'
+            status.value =
+              ev === 'profile_draft'
+                ? '收到画像草稿'
+                : ev === 'reply_ready'
+                  ? '收到话术建议'
+                  : ev === 'tag_recommend'
+                    ? '收到标签推荐'
+                    : '生成失败'
           }
         }
       }
@@ -161,6 +314,44 @@ onUnmounted(() => {
       <button type="button" @click="exchange">重新换票</button>
     </header>
 
+    <section class="card mock-panel">
+      <div class="title-row">
+        <h2>Mock 演示</h2>
+        <button type="button" @click="seedPhysicsScenario">一键物理场景</button>
+      </div>
+      <div class="title-row">
+        <label>
+          external_userid
+          <input v-model="externalUserId" placeholder="demo_wang" />
+        </label>
+        <label>
+          客户
+          <select v-model.number="customerId" @change="switchCustomer">
+            <option v-for="c in customers" :key="c.id" :value="c.id">
+              #{{ c.id }} {{ c.parent_name }}/{{ c.student_name || '—' }}
+              ({{ c.external_id || 'no-ext' }})
+            </option>
+          </select>
+        </label>
+      </div>
+      <div class="title-row">
+        <select v-model="mockDirection">
+          <option value="in">客户回复 (in)</option>
+          <option value="out">顾问发送 (out)</option>
+        </select>
+        <input
+          v-model="mockReply"
+          class="grow"
+          placeholder="模拟一条聊天内容后生成画像"
+          @keyup.enter="sendMockReply"
+        />
+        <button type="button" @click="sendMockReply">写入回复</button>
+      </div>
+      <p class="muted">
+        流程：切客户 / 写入回复 →「生成画像」。也可 POST /mock/customers、/mock/seed/scenario。
+      </p>
+    </section>
+
     <section v-if="context" class="card">
       <div class="title-row">
         <strong>{{ context.customer.parent_name }} / {{ context.customer.student_name }}</strong>
@@ -169,13 +360,13 @@ onUnmounted(() => {
       <div class="tags">
         <span v-for="t in context.tags" :key="t.id" class="chip">{{ t.name }}</span>
       </div>
-      <p class="muted">顾问：{{ context.customer.owner_name || '—' }}</p>
+      <p class="muted">顾问：{{ context.customer.owner_name || '—' }} · customer_id={{ customerId }}</p>
     </section>
 
     <nav class="tabs">
       <button :class="{ active: tab === 'profile' }" type="button" @click="tab = 'profile'">画像</button>
       <button :class="{ active: tab === 'tags' }" type="button" @click="tab = 'tags'">标签</button>
-      <button class="disabled" type="button" disabled>建议（二期）</button>
+      <button :class="{ active: tab === 'suggest' }" type="button" @click="tab = 'suggest'">建议</button>
       <button class="disabled" type="button" disabled>日程（三期）</button>
     </nav>
 
@@ -213,7 +404,10 @@ onUnmounted(() => {
     </section>
 
     <section v-else-if="tab === 'tags'" class="card">
-      <h2>标签</h2>
+      <div class="title-row">
+        <h2>标签 <em class="ai">AI 建议</em></h2>
+        <button type="button" @click="recommendTags">生成推荐</button>
+      </div>
       <ul class="list">
         <li v-for="t in tags?.active || []" :key="t.customer_tag_id">
           <div>
@@ -223,7 +417,55 @@ onUnmounted(() => {
           <button type="button" @click="removeTag(t.customer_tag_id)">移除</button>
         </li>
       </ul>
-      <p class="muted">手工添加可在后台标签体系创建后，用接口 POST /sidebar/tags。</p>
+
+      <div v-if="recommendations" class="block">
+        <h3>推荐草稿 #{{ recommendations.suggestion_id }}</h3>
+        <p class="muted">确认前不会写入正式标签</p>
+        <div v-for="(a, i) in recommendations.add || []" :key="'a'+i" class="chip-row">
+          <span class="chip">+ {{ a.tag_name || a.name }}</span>
+          <span class="muted">{{ a.reason }}</span>
+        </div>
+        <div v-for="(a, i) in recommendations.remove || []" :key="'r'+i" class="chip-row">
+          <span class="chip danger">- {{ a.tag_name || a.name }}</span>
+          <span class="muted">{{ a.reason }}</span>
+        </div>
+        <div class="actions">
+          <button type="button" class="primary" @click="confirmTagRecommend(true)">确认推荐</button>
+          <button type="button" @click="confirmTagRecommend(false)">忽略</button>
+        </div>
+      </div>
+      <p v-else class="muted">暂无 AI 标签推荐。可点「生成推荐」。</p>
+    </section>
+
+    <section v-else-if="tab === 'suggest'" class="card">
+      <div class="title-row">
+        <h2>回复建议 <em class="ai">AI 建议</em></h2>
+        <select v-model="replyScene" @change="refreshAll">
+          <option value="sales">销售</option>
+          <option value="cs" disabled>客服（三期）</option>
+        </select>
+        <button type="button" :disabled="replyBusy" @click="suggestReply">
+          {{ replyBusy ? '生成中…' : '生成建议' }}
+        </button>
+      </div>
+      <p class="muted">不会自动发送；请复制后到企微手动发送。</p>
+
+      <div v-if="reply?.primary">
+        <h3>主建议</h3>
+        <pre>{{ reply.primary }}</pre>
+        <div class="actions">
+          <button type="button" class="primary" @click="replyFeedback('copy')">复制</button>
+          <button type="button" @click="replyFeedback('adopt')">采纳</button>
+          <button type="button" @click="replyFeedback('edit_adopt', reply.primary)">编辑后采纳</button>
+          <button type="button" @click="replyFeedback('reject')">不适用</button>
+        </div>
+        <div v-if="(reply.alternatives || []).length" class="block">
+          <h3>备选</h3>
+          <pre v-for="(alt, i) in reply.alternatives" :key="i">{{ alt }}</pre>
+        </div>
+      </div>
+      <p v-else class="muted">暂无建议。可点击「生成建议」。</p>
+      <p class="muted">SSE：{{ sseLog || '等待连接…' }}</p>
     </section>
   </main>
 </template>
@@ -253,6 +495,13 @@ h2 { margin: 0; font-size: 1.05rem; }
   padding: 14px;
   margin-bottom: 12px;
 }
+.mock-panel input, .mock-panel select {
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+}
+.mock-panel .grow { flex: 1; min-width: 180px; }
 .chip {
   display: inline-block;
   background: #eef4ff;
@@ -262,6 +511,8 @@ h2 { margin: 0; font-size: 1.05rem; }
   margin: 2px 4px 2px 0;
   font-size: 12px;
 }
+.chip.danger { background: #fef3f2; color: #b42318; }
+.chip-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 4px 0; }
 .tabs button {
   border: 1px solid #d0d5dd;
   background: #fff;

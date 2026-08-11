@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.deps import DbSession
-from app.core.errors import ok
+from app.core.errors import AppError, ErrorCode, ok
 from app.core.models import (
     AdminAccount,
     AppUser,
@@ -29,6 +29,32 @@ def _utcnow_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _naive_msg_time(msg_time: datetime | None) -> datetime:
+    if msg_time is None:
+        return _utcnow_naive()
+    if msg_time.tzinfo is not None:
+        return msg_time.replace(tzinfo=None)
+    return msg_time
+
+
+async def _default_advisor(db: DbSession) -> AppUser:
+    result = await db.execute(
+        select(AppUser).where(
+            AppUser.role == "advisor",
+            AppUser.deleted_at.is_(None),
+            AppUser.status == 1,
+        )
+    )
+    advisor = result.scalars().first()
+    if advisor is None:
+        raise AppError(
+            ErrorCode.NOT_FOUND,
+            "无可用顾问，请先执行 POST /mock/seed/demo",
+            http_status=404,
+        )
+    return advisor
+
+
 class MockMessageBody(BaseModel):
     customer_id: int
     direction: str = "in"
@@ -44,6 +70,42 @@ class MockOrderBody(BaseModel):
     amount: float = 0
     status: str = "paid"
     external_order_no: str | None = None
+
+
+class MockCustomerBody(BaseModel):
+    parent_name: str
+    student_name: str | None = None
+    grade: str | None = None
+    school: str | None = None
+    stage: str | None = None
+    external_id: str | None = None
+    owner_user_id: int | None = None
+    org_id: int | None = None
+    remark: str | None = None
+
+
+class ScenarioMessage(BaseModel):
+    direction: str = "in"
+    msg_type: str = "text"
+    content: str
+    asr_text: str | None = None
+
+
+class MockScenarioBody(BaseModel):
+    """Create (or reuse by external_id) a customer and seed chat lines."""
+
+    parent_name: str
+    student_name: str | None = None
+    grade: str | None = None
+    school: str | None = None
+    stage: str | None = None
+    external_id: str | None = None
+    owner_user_id: int | None = None
+    org_id: int | None = None
+    remark: str | None = None
+    messages: list[ScenarioMessage] = Field(default_factory=list)
+    append_messages: bool = True
+    cs_summary: str | None = None
 
 
 @router.post("/seed/demo")
@@ -187,28 +249,234 @@ async def seed_demo(db: DbSession) -> dict[str, Any]:
     )
 
 
+@router.get("/customers")
+async def list_mock_customers(
+    db: DbSession,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    rows = (
+        await db.execute(
+            select(Customer)
+            .where(Customer.deleted_at.is_(None))
+            .order_by(Customer.id.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return ok(
+        {
+            "items": [
+                {
+                    "id": c.id,
+                    "external_id": c.external_id,
+                    "parent_name": c.parent_name,
+                    "student_name": c.student_name,
+                    "grade": c.grade,
+                    "school": c.school,
+                    "stage": c.stage,
+                    "owner_user_id": c.owner_user_id,
+                    "org_id": c.org_id,
+                }
+                for c in rows
+            ]
+        }
+    )
+
+
+@router.post("/customers")
+async def create_mock_customer(
+    body: MockCustomerBody, db: DbSession
+) -> dict[str, Any]:
+    if body.external_id:
+        existing = (
+            await db.execute(
+                select(Customer).where(
+                    Customer.external_id == body.external_id,
+                    Customer.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            raise AppError(
+                ErrorCode.CONFLICT,
+                f"external_id 已存在: {body.external_id}",
+                data={"customer_id": existing.id},
+                http_status=409,
+            )
+
+    advisor = None
+    if body.owner_user_id is None or body.org_id is None:
+        advisor = await _default_advisor(db)
+
+    owner_id = body.owner_user_id or (advisor.id if advisor else None)
+    org_id = body.org_id
+    if org_id is None and advisor is not None:
+        org_id = advisor.org_id
+
+    customer = Customer(
+        external_id=body.external_id,
+        parent_name=body.parent_name,
+        student_name=body.student_name,
+        grade=body.grade,
+        school=body.school,
+        stage=body.stage,
+        owner_user_id=owner_id,
+        org_id=org_id,
+        remark=body.remark,
+        last_contact_at=_utcnow_naive(),
+    )
+    db.add(customer)
+    await db.commit()
+    await db.refresh(customer)
+    return ok(
+        {
+            "id": customer.id,
+            "external_id": customer.external_id,
+            "parent_name": customer.parent_name,
+            "student_name": customer.student_name,
+            "owner_user_id": customer.owner_user_id,
+            "org_id": customer.org_id,
+        }
+    )
+
+
+@router.post("/seed/scenario")
+async def seed_scenario(body: MockScenarioBody, db: DbSession) -> dict[str, Any]:
+    """Upsert customer by external_id (if given) and seed mock chat messages."""
+    customer: Customer | None = None
+    created = False
+    if body.external_id:
+        customer = (
+            await db.execute(
+                select(Customer).where(
+                    Customer.external_id == body.external_id,
+                    Customer.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+
+    if customer is None:
+        advisor = None
+        if body.owner_user_id is None or body.org_id is None:
+            advisor = await _default_advisor(db)
+        owner_id = body.owner_user_id or (advisor.id if advisor else None)
+        org_id = body.org_id if body.org_id is not None else (
+            advisor.org_id if advisor else None
+        )
+        customer = Customer(
+            external_id=body.external_id,
+            parent_name=body.parent_name,
+            student_name=body.student_name,
+            grade=body.grade,
+            school=body.school,
+            stage=body.stage,
+            owner_user_id=owner_id,
+            org_id=org_id,
+            remark=body.remark,
+            last_contact_at=_utcnow_naive(),
+        )
+        db.add(customer)
+        await db.flush()
+        created = True
+    else:
+        # refresh profile fields for demo convenience
+        customer.parent_name = body.parent_name
+        if body.student_name is not None:
+            customer.student_name = body.student_name
+        if body.grade is not None:
+            customer.grade = body.grade
+        if body.school is not None:
+            customer.school = body.school
+        if body.stage is not None:
+            customer.stage = body.stage
+        if body.remark is not None:
+            customer.remark = body.remark
+        customer.last_contact_at = _utcnow_naive()
+
+    message_ids: list[int] = []
+    if body.messages:
+        if not body.append_messages and not created:
+            old = (
+                await db.execute(
+                    select(ChatMessage).where(ChatMessage.customer_id == customer.id)
+                )
+            ).scalars().all()
+            for row in old:
+                await db.delete(row)
+
+        for msg in body.messages:
+            row = ChatMessage(
+                customer_id=customer.id,
+                direction=msg.direction,
+                msg_type=msg.msg_type,
+                content=msg.content,
+                asr_text=msg.asr_text,
+                msg_time=_utcnow_naive(),
+                is_mock=True,
+            )
+            db.add(row)
+            await db.flush()
+            message_ids.append(row.id)
+
+    if body.cs_summary:
+        cs = (
+            await db.execute(
+                select(CsSummary).where(CsSummary.customer_id == customer.id)
+            )
+        ).scalar_one_or_none()
+        if cs is None:
+            db.add(
+                CsSummary(
+                    customer_id=customer.id,
+                    summary_text=body.cs_summary,
+                    updated_by=customer.owner_user_id,
+                )
+            )
+        else:
+            cs.summary_text = body.cs_summary
+
+    await db.commit()
+    await db.refresh(customer)
+    return ok(
+        {
+            "created": created,
+            "customer_id": customer.id,
+            "external_id": customer.external_id,
+            "parent_name": customer.parent_name,
+            "student_name": customer.student_name,
+            "message_ids": message_ids,
+            "hint": "POST /sidebar/profile/generate with this customer_id",
+        }
+    )
+
+
 @router.post("/messages")
 async def mock_messages(body: MockMessageBody, db: DbSession) -> dict[str, Any]:
-    msg_time = body.msg_time
-    if msg_time and msg_time.tzinfo is not None:
-        msg_time = msg_time.replace(tzinfo=None)
+    customer = await db.get(Customer, body.customer_id)
+    if customer is None or customer.deleted_at is not None:
+        raise AppError(ErrorCode.NOT_FOUND, "客户不存在", http_status=404)
+
     row = ChatMessage(
         customer_id=body.customer_id,
         direction=body.direction,
         msg_type=body.msg_type,
         content=body.content,
         asr_text=body.asr_text,
-        msg_time=msg_time or _utcnow_naive(),
+        msg_time=_naive_msg_time(body.msg_time),
         is_mock=True,
     )
     db.add(row)
+    customer.last_contact_at = row.msg_time
     await db.commit()
     await db.refresh(row)
-    return ok({"id": row.id})
+    return ok({"id": row.id, "customer_id": row.customer_id})
 
 
 @router.post("/orders")
 async def mock_orders(body: MockOrderBody, db: DbSession) -> dict[str, Any]:
+    customer = await db.get(Customer, body.customer_id)
+    if customer is None or customer.deleted_at is not None:
+        raise AppError(ErrorCode.NOT_FOUND, "客户不存在", http_status=404)
+
     row = OrderRecord(
         customer_id=body.customer_id,
         title=body.title,

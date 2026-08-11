@@ -38,7 +38,7 @@ class DeepSeekProvider:
             "response_format": {"type": "json_object"},
         }
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=45.0) as client:
                 resp = await client.post(url, headers=headers, json=body)
                 resp.raise_for_status()
                 data = resp.json()

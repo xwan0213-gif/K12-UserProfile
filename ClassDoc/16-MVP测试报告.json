@@ -1,0 +1,197 @@
+{
+  "summary": {
+    "total": 30,
+    "passed": 30,
+    "failed": 0
+  },
+  "cases": [
+    {
+      "id": "INFRA-01",
+      "name": "API /health",
+      "ok": true,
+      "detail": "{\"service\": \"K12-UserProfile\", \"mock_wecom\": true, \"mock_llm\": false, \"llm_provider\": \"deepseek\"}"
+    },
+    {
+      "id": "INFRA-02",
+      "name": "Nginx /",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "id": "INFRA-03",
+      "name": "Nginx /admin/",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "id": "3.H.0",
+      "name": "POST /mock/seed/demo",
+      "ok": true,
+      "detail": "{\"seeded\": false, \"message\": \"demo data already exists\"}"
+    },
+    {
+      "id": "T-M5-03a",
+      "name": "GET /mock/customers has demo",
+      "ok": true,
+      "detail": "{\"id\": 1, \"external_id\": \"demo_wang\", \"parent_name\": \"王女士\", \"student_name\": \"王小明\", \"grade\": \"初二\", \"school\": \"城南实验中学\", \"stage\": \"junior\", \"owner_user_id\": 3, \"org_id\": 2}"
+    },
+    {
+      "id": "T-M6-01a",
+      "name": "wecom exchange mock",
+      "ok": true,
+      "detail": "customer_id=1"
+    },
+    {
+      "id": "T-M6-01b",
+      "name": "GET /sidebar/context",
+      "ok": {
+        "id": 1,
+        "parent_name": "王女士",
+        "student_name": "王小明",
+        "grade": "初二",
+        "school": "城南实验中学",
+        "stage": "junior",
+        "owner_name": "李顾问"
+      },
+      "detail": "{\"id\": 1, \"parent_name\": \"王女士\", \"student_name\": \"王小明\", \"grade\": \"初二\", \"school\": \"城南实验中学\", \"stage\": \"junior\", \"owner_name\": \"李顾问\"}"
+    },
+    {
+      "id": "T-M5-02a",
+      "name": "admin login",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T-M5-02b",
+      "name": "regional login",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T-M5-02c",
+      "name": "advisor login",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T-M5-02d",
+      "name": "advisor customer scope <= admin",
+      "ok": true,
+      "detail": "admin=3 advisor=3"
+    },
+    {
+      "id": "T-M5-03b",
+      "name": "dashboard summary",
+      "ok": true,
+      "detail": "{\"funnel\": {\"lead\": 3, \"intent\": 1, \"trial\": 1, \"deal\": 1}, \"renewal_rate\": 0.63, \"advisor_top\": [{\"user_id\": 3, \"name\": \"李顾问\", \"customers\": 3, \"deals\": 0, \"score\": 75}]}"
+    },
+    {
+      "id": "T-M5-03c",
+      "name": "admin tags list",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T-M5-01",
+      "name": "admin orgs list",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T-M5-01b",
+      "name": "admin create org",
+      "ok": true,
+      "detail": "{\"id\": 4}"
+    },
+    {
+      "id": "T-M5-03d",
+      "name": "sidebar tags",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T-M1-01a",
+      "name": "seed scenario physics",
+      "ok": true,
+      "detail": "{\"created\": false, \"customer_id\": 3, \"external_id\": \"mvp_test_physics\", \"parent_name\": \"测试赵女士\", \"student_name\": \"测试赵一凡\", \"message_ids\": [14, 15, 16], \"hint\": \"POST /sidebar/profile/generate with this customer_id\"}"
+    },
+    {
+      "id": "T-M1-01b",
+      "name": "mock message append",
+      "ok": true,
+      "detail": "{\"id\": 17, \"customer_id\": 1}"
+    },
+    {
+      "id": "3.H.1a",
+      "name": "profile generate queued",
+      "ok": true,
+      "detail": "{\"job_id\": 15, \"status\": \"queued\"}"
+    },
+    {
+      "id": "T-M1-01",
+      "name": "draft has 4 partitions + confidence/sources",
+      "ok": true,
+      "detail": "{\"draft_id\": 13, \"confidence\": 0.9, \"sources\": [\"confirmed_summary\", \"messages\", \"orders\", \"cs_summary\"], \"generating\": true, \"mock_llm\": false}"
+    },
+    {
+      "id": "T-M1-02",
+      "name": "dashboard funnel not treating draft as confirmed deal",
+      "ok": true,
+      "detail": "before={'lead': 3, 'intent': 1, 'trial': 1, 'deal': 1} mid={'lead': 3, 'intent': 1, 'trial': 1, 'deal': 1}"
+    },
+    {
+      "id": "T-M1-04a",
+      "name": "patch draft field",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T-M1-04b",
+      "name": "confirm single field",
+      "ok": true,
+      "detail": "{\"profile_version\": 10, \"draft_status\": \"partial_confirmed\"}"
+    },
+    {
+      "id": "3.H.2",
+      "name": "confirm all",
+      "ok": true,
+      "detail": "{\"profile_version\": 11, \"draft_status\": \"merged\"}"
+    },
+    {
+      "id": "3.H.2b",
+      "name": "admin customer detail has confirmed profile",
+      "ok": true,
+      "detail": "{\"confirmed\": {\"version\": 11, \"basic_info\": {\"grade\": \"初二\", \"stage\": \"junior\", \"school\": \"城南实验中学\", \"parent_name\": \"王女士\", \"student_name\": \"王小明\"}, \"study_info\": {\"goal\": \"夯实基础\", \"intent\": \"试听\", \"score_hint\": \"期中约70\", \"weak_subjects\": [\"数学\"]}, \"prefer_info\": {\"note\": \"mvp-edit\", \"active_hours\": \"19:00-21:00\"}, \"timeline\": [{\"date\": \"2026-06-20\", \"text\": \"首次咨询初二数学\"}, {\"date\": \"2026-06-25\", \"text\": \"了解"
+    },
+    {
+      "id": "T-M1-01c",
+      "name": "scenario customer profile draft",
+      "ok": true,
+      "detail": "{\"queued\": true, \"generating\": false, \"basic\": {\"grade\": \"高一\", \"stage\": \"senior\", \"school\": \"市一中\", \"parent_name\": \"测试赵女士\", \"student_name\": \"测试赵一凡\"}, \"study\": {\"score\": 58, \"subject\": \"物理\", \"weakness\": \"物理跟不上\", \"exam_type\": \"期中\"}}"
+    },
+    {
+      "id": "T-M1-03",
+      "name": "confirmed remains after regenerate",
+      "ok": true,
+      "detail": "has_confirmed=True has_new_draft=True"
+    },
+    {
+      "id": "T-P-01",
+      "name": "no wecom send API (reply is P2 placeholder)",
+      "ok": true,
+      "detail": "{\"phase\": \"P2\", \"message\": \"reply feature scaffold\"}"
+    },
+    {
+      "id": "T-M6-03",
+      "name": "UI copy contains AI 建议",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T-M6-02",
+      "name": "SSE endpoint reachable",
+      "ok": true,
+      "detail": "status=200 peek=b'event: ping\\ndata: {\"ts\": 3851.755}\\n\\neven'"
+    }
+  ]
+}
