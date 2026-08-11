@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     mock_wecom: bool = True
     mock_llm: bool = True
 
+    asr_provider: str = "fake"
+    asr_api_key: str = ""
+
     wecom_corp_id: str = ""
     wecom_secret: str = ""
 

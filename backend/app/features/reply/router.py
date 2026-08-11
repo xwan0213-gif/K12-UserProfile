@@ -38,6 +38,16 @@ class SuggestBody(BaseModel):
     force: bool = False
 
 
+def _normalize_scene(scene: str | None) -> str:
+    raw = (scene or "sales").strip().lower()
+    if raw in ("service", "cs"):
+        return "cs"
+    if raw == "sales":
+        return "sales"
+    # allow unknown scenes through but keep alias mapping for service
+    return raw
+
+
 class FeedbackBody(BaseModel):
     suggestion_id: int
     action: FeedbackAction
@@ -90,7 +100,7 @@ async def suggest_reply(
     background: BackgroundTasks,
 ) -> dict[str, Any]:
     cid = await _resolve_customer_id(db, user, body.customer_id)
-    scene = body.scene or "sales"
+    scene = _normalize_scene(body.scene)
 
     await job_svc.fail_stuck_jobs(db, customer_id=cid, task_type="reply")
 
@@ -130,6 +140,7 @@ async def latest_reply(
     scene: str | None = Query(default="sales"),
 ) -> dict[str, Any]:
     cid = await _resolve_customer_id(db, user, customer_id)
+    scene_norm = _normalize_scene(scene) if scene else None
     q = (
         select(Suggestion)
         .where(
@@ -140,8 +151,8 @@ async def latest_reply(
         .order_by(Suggestion.created_at.desc())
         .limit(1)
     )
-    if scene:
-        q = q.where(Suggestion.scene == scene)
+    if scene_norm:
+        q = q.where(Suggestion.scene == scene_norm)
     row = (await db.execute(q)).scalar_one_or_none()
     if row is None:
         return ok(None)

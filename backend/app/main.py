@@ -14,6 +14,7 @@ from app.core.errors import (
     validation_exception_handler,
 )
 from app.features.admin.router import router as admin_router
+from app.features.asr.router import router as asr_router
 from app.features.mock.router import router as mock_router
 from app.features.profile.router import router as profile_router
 from app.features.reply.router import router as reply_router
@@ -68,6 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(profile_router, prefix=prefix)
     app.include_router(tag_router, prefix=prefix)
     app.include_router(reply_router, prefix=prefix)
+    app.include_router(asr_router, prefix=prefix)
     app.include_router(schedule_router, prefix=prefix)
     app.include_router(admin_router, prefix=prefix)
     app.include_router(mock_router, prefix=prefix)

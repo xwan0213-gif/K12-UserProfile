@@ -1,0 +1,171 @@
+{
+  "summary": {
+    "total": 27,
+    "passed": 27,
+    "failed": 0
+  },
+  "cases": [
+    {
+      "id": "INFRA-01",
+      "name": "API health",
+      "ok": true,
+      "detail": "{\"service\": \"K12-UserProfile\", \"mock_wecom\": true, \"mock_llm\": false, \"llm_provider\": \"deepseek\"}"
+    },
+    {
+      "id": "INFRA-02",
+      "name": "Nginx /",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "id": "INFRA-03",
+      "name": "Nginx /admin/",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "id": "P2-SEED-01",
+      "name": "mock seed/demo",
+      "ok": true,
+      "detail": "{\"seeded\": false, \"message\": \"demo data already exists\"}"
+    },
+    {
+      "id": "P2-AUTH-01",
+      "name": "admin login",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-SEED-02",
+      "name": "tag catalog loaded (>=15)",
+      "ok": true,
+      "detail": "count=45"
+    },
+    {
+      "id": "P2-SEED-03",
+      "name": "script templates loaded (>=20)",
+      "ok": true,
+      "detail": "count=124"
+    },
+    {
+      "id": "P2-ADMIN-01",
+      "name": "create script template",
+      "ok": true,
+      "detail": "{\"id\": 125}"
+    },
+    {
+      "id": "P2-AUTH-02",
+      "name": "wecom exchange",
+      "ok": true,
+      "detail": "cid=1"
+    },
+    {
+      "id": "P2-SEED-04",
+      "name": "senior scenario customer",
+      "ok": true,
+      "detail": "{\"created\": true, \"customer_id\": 4, \"external_id\": \"p2_test_senior\", \"parent_name\": \"测试高中家长\", \"student_name\": \"测试高中生\", \"message_ids\": [18, 19, 20], \"hint\": \"POST /sidebar/profile/generate with this customer_id\"}"
+    },
+    {
+      "id": "T-R-00a",
+      "name": "reply suggest junior queued",
+      "ok": true,
+      "detail": "{\"job_id\": 25, \"status\": \"queued\"}"
+    },
+    {
+      "id": "T-R-00b",
+      "name": "reply junior has primary + alternatives + AI label",
+      "ok": true,
+      "detail": "{\"primary\": \"王女士您好，结合王小明（初二）近期数学情况，建议先安排一次针对性诊断/试听，再讨论班型与价格。\", \"alts\": [\"方便的话本周可约数学体验课，课后我会把薄弱点与提升路径发给您。\", \"可参考话术要点「首次加微欢迎-初中」：先价值后报价，邀约到访/试听。\"], \"label\": \"AI 建议\"}"
+    },
+    {
+      "id": "T-R-00c",
+      "name": "reply suggest senior queued",
+      "ok": true,
+      "detail": "{\"job_id\": 26, \"status\": \"queued\"}"
+    },
+    {
+      "id": "T-R-01",
+      "name": "stage-differentiated reply (junior vs senior text differs)",
+      "ok": true,
+      "detail": "{\"junior\": \"王女士您好，结合王小明（初二）近期数学情况，建议先安排一次针对性诊断/试听，再讨论班型与价格。\", \"senior\": \"测试高中家长您好，价格会因班型与课时略有差异；结合测试高中生物理基础，更建议先试听摸清缺口，再给准确方案。\"}"
+    },
+    {
+      "id": "T-R-02",
+      "name": "no auto-send WeCom API (send endpoint absent/failed)",
+      "ok": true,
+      "detail": "status=404 body={\"code\": 40401, \"message\": \"Not Found\", \"data\": null}"
+    },
+    {
+      "id": "T-R-03a",
+      "name": "adoption endpoint before",
+      "ok": true,
+      "detail": "{\"items\": [{\"user_id\": 3, \"name\": \"李顾问\", \"impressions\": 7, \"adopt\": 0, \"reject\": 0, \"edit_adopt\": 0, \"copy\": 0, \"tag_confirm\": 0, \"tag_reject\": 0, \"day\": null, \"adoption_rate\": 0.0}], \"group_by\": \"advisor\"}"
+    },
+    {
+      "id": "T-R-02b",
+      "name": "feedback copy recorded",
+      "ok": true,
+      "detail": "{\"suggestion_id\": 2, \"status\": \"shown\"}"
+    },
+    {
+      "id": "T-R-03b",
+      "name": "feedback adopt recorded",
+      "ok": true,
+      "detail": "{\"suggestion_id\": 2, \"status\": \"adopted\"}"
+    },
+    {
+      "id": "T-R-03",
+      "name": "adoption metrics change after feedback",
+      "ok": true,
+      "detail": "before_copy=0 before_adopt=0 after_copy=1 after_adopt=1"
+    },
+    {
+      "id": "T-T-00",
+      "name": "tag recommend queued",
+      "ok": true,
+      "detail": "{\"job_id\": 28, \"status\": \"queued\"}"
+    },
+    {
+      "id": "T-T-02",
+      "name": "recommendation reasons visible",
+      "ok": true,
+      "detail": "{\"suggestion_id\": 4, \"status\": \"shown\", \"add\": [{\"reason\": \"连续咨询并提到试听\", \"tag_name\": \"近期决策\"}, {\"reason\": \"客户学段为初中\", \"tag_name\": \"初中\"}], \"remove\": []}"
+    },
+    {
+      "id": "T-T-01a",
+      "name": "recommend draft does not write formal tags yet",
+      "ok": true,
+      "detail": "new_adds=['近期决策', '初中'] leaked=[] active_mid=['数学薄弱', '高意向']"
+    },
+    {
+      "id": "T-T-01b",
+      "name": "confirm recommendation",
+      "ok": true,
+      "detail": "{\"suggestion_id\": 4, \"status\": \"adopted\", \"added\": [\"初中\", \"近期决策\"], \"removed\": []}"
+    },
+    {
+      "id": "T-T-01",
+      "name": "tags applied only after confirm",
+      "ok": true,
+      "detail": "new_adds=['近期决策', '初中'] after=['初中', '数学薄弱', '近期决策', '高意向']"
+    },
+    {
+      "id": "T-T-03",
+      "name": "active tags expose SOP text",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T-UI-01",
+      "name": "sidebar bundle has 建议 + AI 建议 + 不代发文案",
+      "ok": true,
+      "detail": "ai=True nosend=True"
+    },
+    {
+      "id": "T-UI-02",
+      "name": "admin bundle has 话术模板 + AI 分析",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

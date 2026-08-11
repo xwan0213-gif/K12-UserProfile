@@ -1,0 +1,89 @@
+{
+  "summary": {
+    "total": 16,
+    "passed": 16,
+    "failed": 0
+  },
+  "cases": [
+    {
+      "id": "INFRA",
+      "ok": true,
+      "detail": "{\"service\": \"K12-UserProfile\", \"mock_wecom\": true, \"mock_llm\": false, \"llm_provider\": \"deepseek\"}"
+    },
+    {
+      "id": "AUTH",
+      "ok": true,
+      "detail": "cid=1"
+    },
+    {
+      "id": "T-R-04a",
+      "ok": true,
+      "detail": "{\"asr_text\": \"下周周六上午方便来试听吗\", \"message_id\": 23, \"customer_id\": 1}"
+    },
+    {
+      "id": "T-R-05a",
+      "ok": true,
+      "detail": "{\"job_id\": 31, \"status\": \"queued\"}"
+    },
+    {
+      "id": "T-R-05",
+      "ok": true,
+      "detail": "王女士您好，关于王小明（初二）课后服务，我这边可协助处理补课、到课确认、学情反馈或续费说明，请告诉我您最关心的一点。"
+    },
+    {
+      "id": "T-R-05b",
+      "ok": true,
+      "detail": "{\"job_id\": 32, \"status\": \"queued\"}"
+    },
+    {
+      "id": "T-S-01a",
+      "ok": true,
+      "detail": "{\"job_id\": 33, \"status\": \"queued\"}"
+    },
+    {
+      "id": "T-S-01",
+      "ok": true,
+      "detail": "{\"suggestion_id\": 14, \"title\": \"试听安排/回访确认\", \"time_text\": \"下周六 待定\", \"start_at\": null, \"priority\": \"high\", \"source_quote\": \"下周六上午我们过来试听，记得提醒我\", \"predictive_tip\": \"试听后建议 48h 内回访，确认意向与档期\", \"status\": \"shown\", \"created_at\": \"2026-08-11T12:30:45.245402+00:00Z\"}"
+    },
+    {
+      "id": "T-S-04a",
+      "ok": true,
+      "detail": "{\"weak_tip\": true, \"quiet_hours\": [\"22:00-08:00\"], \"strong_notify\": false}"
+    },
+    {
+      "id": "T-S-04",
+      "ok": true,
+      "detail": "{\"weak_tip\": true, \"quiet_hours\": [\"22:00-08:00\"], \"strong_notify\": false}"
+    },
+    {
+      "id": "T-S-02",
+      "ok": true,
+      "detail": "{\"id\": 2, \"customer_id\": 1, \"owner_user_id\": 3, \"title\": \"试听安排/回访确认\", \"start_at\": null, \"end_at\": null, \"priority\": \"high\", \"status\": \"confirmed\", \"sync_state\": \"failed\", \"external_cal_id\": null, \"source\": \"ai\", \"suggestion_id\": 14, \"remark\": \"试听后建议 48h 内回访，确认意向与档期\", \"created_at\": \"2026-08-11T12:30:"
+    },
+    {
+      "id": "T-S-02b",
+      "ok": true,
+      "detail": "sync_state=failed"
+    },
+    {
+      "id": "T-S-02c",
+      "ok": true,
+      "detail": "count=1"
+    },
+    {
+      "id": "T-S-03a",
+      "ok": true,
+      "detail": "{\"delivered\": true, \"degraded\": false, \"message\": \"弱提示已推送\", \"schedule_id\": 2}"
+    },
+    {
+      "id": "T-S-03",
+      "ok": true,
+      "detail": "{\"delivered\": false, \"degraded\": true, \"message\": \"强提醒已关闭\", \"schedule_id\": 2}"
+    },
+    {
+      "id": "T-R-04",
+      "ok": true,
+      "detail": "{\"based_on_asr\": \"初二数学想夯实基础，方便约试听吗？P2-1786450713\", \"primary\": \"王女士您好，结合王小明（初二）近期数学情况，建议先安排一次针对性诊断/试听，再讨论班型与价格。\"}"
+    }
+  ]
+}

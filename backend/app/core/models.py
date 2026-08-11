@@ -301,3 +301,33 @@ class ScriptTemplate(Base):
     updated_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), onupdate=func.now()
     )
+
+
+class ScheduleItem(Base):
+    __tablename__ = "schedule_item"
+    __table_args__ = (
+        Index("idx_schedule_owner_time", "owner_user_id", "start_at"),
+        Index("idx_schedule_customer", "customer_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("customer.id")
+    )
+    owner_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("app_user.id")
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    start_at: Mapped[datetime | None] = mapped_column()
+    end_at: Mapped[datetime | None] = mapped_column()
+    priority: Mapped[str | None] = mapped_column(String(16))
+    status: Mapped[str | None] = mapped_column(String(16))
+    sync_state: Mapped[str] = mapped_column(String(16), default="none")
+    external_cal_id: Mapped[str | None] = mapped_column(String(64))
+    source: Mapped[str | None] = mapped_column(String(16))
+    suggestion_id: Mapped[int | None] = mapped_column(BigInteger)
+    remark: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )

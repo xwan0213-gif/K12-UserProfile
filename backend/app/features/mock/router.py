@@ -17,6 +17,7 @@ from app.core.models import (
     CustomerTag,
     OrderRecord,
     Org,
+    ScriptTemplate,
     TagDef,
 )
 from app.core.security import hash_password
@@ -163,6 +164,32 @@ async def seed_demo(db: DbSession) -> dict[str, Any]:
     ]
     db.add_all(tags)
     await db.flush()
+
+    db.add_all(
+        [
+            ScriptTemplate(
+                scene="sales",
+                stage="junior",
+                title="初中试听邀约",
+                content="家长您好，结合孩子近期薄弱点，建议先安排一次诊断/试听再谈班型。",
+                enabled=True,
+            ),
+            ScriptTemplate(
+                scene="cs",
+                stage=None,
+                title="请假补课",
+                content="已记录请假诉求，可协调同进度补课并确认下次到课时间。",
+                enabled=True,
+            ),
+            ScriptTemplate(
+                scene="cs",
+                stage="junior",
+                title="续费沟通",
+                content="课程临近节点，可梳理剩余课时与续费档位，方便对照选择。",
+                enabled=True,
+            ),
+        ]
+    )
 
     customer = Customer(
         external_id="demo_wang",

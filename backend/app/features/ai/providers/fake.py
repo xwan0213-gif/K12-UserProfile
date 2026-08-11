@@ -92,6 +92,18 @@ class FakeLLMProvider:
                     :40
                 ]
             scene = context.get("scene") or "sales"
+            if scene in ("cs", "service"):
+                return _fake_cs_reply(
+                    parent=parent,
+                    student=student,
+                    grade=grade,
+                    stage=stage,
+                    subject=subject,
+                    blob=blob,
+                    based_on=based_on,
+                    tpl_hint=tpl_hint,
+                    scene="cs",
+                )
             primary = (
                 f"{parent}您好，结合{student}（{grade}）近期{subject}情况，"
                 f"建议先安排一次针对性诊断/试听，再讨论班型与价格。"
@@ -116,6 +128,9 @@ class FakeLLMProvider:
                 "based_on_asr": based_on[:120] if based_on else None,
                 "scene": scene,
             }
+
+        if task == "schedule":
+            return _fake_schedule(context, blob=blob, parent=parent, student=student)
 
         if task == "tag_recommend":
             catalog = context.get("tag_catalog") or []
@@ -162,3 +177,139 @@ class FakeLLMProvider:
             return {"add": add[:5], "remove": remove[:3]}
 
         return {"task": task, "echo": payload, "provider": "fake"}
+
+
+def _fake_cs_reply(
+    *,
+    parent: str,
+    student: str,
+    grade: str,
+    stage: str | None,
+    subject: str,
+    blob: str,
+    based_on: str,
+    tpl_hint: str,
+    scene: str,
+) -> dict[str, Any]:
+    """Service-oriented wording: 补课/投诉/续费/到课 — not sales 试听逼单."""
+    if "投诉" in blob or "不满" in blob or "差评" in blob:
+        primary = (
+            f"{parent}您好，非常理解您的着急。关于{student}近期上课体验，"
+            f"我们会在24小时内给出补课/换班方案，并同步班主任跟进。"
+        )
+        alt1 = f"先跟您确认问题节点：是内容听不懂、到课冲突，还是师资匹配？我们按点处理。"
+        alt2 = f"若需要，可先安排一次{subject}补课，把缺口补上后再看后续班型。"
+    elif "续费" in blob or "到期" in blob or "延期" in blob:
+        primary = (
+            f"{parent}您好，{student}（{grade}）课程临近节点，"
+            f"我帮您梳理剩余课时、续费档位与到课安排，方便您对照选择。"
+        )
+        alt1 = "续费可保留原班次优先名额；若时间冲突，我们可先调课再谈续费。"
+        alt2 = "需要的话我发一份学情小结+续费对照表，您看完再决定。"
+    elif "请假" in blob or "补课" in blob or "缺课" in blob:
+        primary = (
+            f"{parent}您好，已记录{student}请假诉求。我们可协调同进度补课或录播跟进，"
+            f"并确认下次到课时间，避免进度掉队。"
+        )
+        alt1 = "请您告知方便补课的时段，我帮您锁定教室与老师档期。"
+        alt2 = "若本周无法到课，也可先完成作业打卡，补课后我再做学情回访。"
+    elif "到课" in blob or "签到" in blob or "上课" in blob:
+        primary = (
+            f"{parent}您好，提醒一下{student}本周到课安排；"
+            f"如有冲突请提前说，我们按规则办理请假/补课，不影响后续进度。"
+        )
+        alt1 = "到课前一天我会再弱提醒一次，您不用额外操心。"
+        alt2 = "若路上延误，请先发消息，我们尽量保留座位与讲义。"
+    else:
+        primary = (
+            f"{parent}您好，关于{student}（{grade}）课后服务，"
+            f"我这边可协助处理补课、到课确认、学情反馈或续费说明，请告诉我您最关心的一点。"
+        )
+        alt1 = f"若是{subject}跟不上，优先安排补课与错题回顾，比换班更稳妥。"
+        alt2 = "投诉与退费诉求我们会按流程受理，先倾听再给可行方案。"
+    if tpl_hint:
+        alt2 = f"可参考客服话术「{tpl_hint}」：先安抚确认诉求，再给补课/到课/续费方案。"
+    return {
+        "primary": primary,
+        "alternatives": [alt1, alt2],
+        "stage": stage,
+        "based_on_asr": based_on[:120] if based_on else None,
+        "scene": scene,
+    }
+
+
+def _fake_schedule(
+    context: dict[str, Any],
+    *,
+    blob: str,
+    parent: str,
+    student: str,
+) -> dict[str, Any]:
+    """Parse time/intent phrases → schedule draft JSON + optional predictive tip."""
+    quote = ""
+    for m in reversed(context.get("messages") or []):
+        text = str(m.get("asr_text") or m.get("content") or "")
+        if any(
+            k in text
+            for k in ("下周", "周六", "周天", "周日", "试听", "回访", "续费", "补课", "到访")
+        ):
+            quote = text
+            break
+    if not quote:
+        quote = (blob.split("\n")[-1] if blob else "")[:80]
+
+    title = f"跟进{parent}/{student}"
+    time_text = "待定"
+    priority = "medium"
+    start_at = None
+
+    if "试听" in blob or "体验" in blob:
+        title = "试听安排/回访确认"
+        priority = "high"
+    elif "回访" in blob:
+        title = "课后回访"
+        priority = "high"
+    elif "续费" in blob or "到期" in blob:
+        title = "续费沟通"
+        priority = "high"
+    elif "补课" in blob or "请假" in blob:
+        title = "补课协调"
+        priority = "medium"
+    elif "到访" in blob or "看课" in blob:
+        title = "到访看课"
+
+    if "下周六" in blob:
+        time_text = "下周六 待定"
+    elif "周六" in blob:
+        time_text = "本周六 待定"
+    elif "下周" in blob:
+        time_text = "下周 待定"
+    elif "周日" in blob or "周天" in blob:
+        time_text = "周日 待定"
+
+    predictive_tip = None
+    orders = context.get("orders") or []
+    tags = context.get("tags") or context.get("active_tags") or []
+    tag_names = {
+        (t.get("name") if isinstance(t, dict) else str(t)) for t in tags
+    }
+    if any("续费" in str(t) for t in tag_names) or any(
+        "续费" in str(o.get("title") or "") for o in orders if isinstance(o, dict)
+    ):
+        predictive_tip = "续费窗口临近，建议提前安排一对一沟通"
+    elif any("试听" in str(t) for t in tag_names) or "试听" in blob:
+        predictive_tip = "试听后建议 48h 内回访，确认意向与档期"
+    elif orders:
+        predictive_tip = "已有成交/体验订单，可安排到课提醒或学情回访"
+    else:
+        predictive_tip = "根据近窗沟通，建议预留一次跟进待办"
+
+    return {
+        "title": title,
+        "time_text": time_text,
+        "start_at": start_at,
+        "priority": priority,
+        "source_quote": quote[:120] if quote else None,
+        "predictive_tip": predictive_tip,
+        "remark": predictive_tip,
+    }
