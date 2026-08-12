@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import SchedulePanel from './components/SchedulePanel.vue'
+import WeakTipBar from './components/WeakTipBar.vue'
+import { createApi } from './composables/useApi'
+import { createSseClient } from './composables/useSse'
 
-const apiBase = '/api/v1'
 const status = ref('idle')
 const token = ref('')
 const customerId = ref<number | null>(null)
@@ -13,29 +16,65 @@ const tags = ref<any>(null)
 const reply = ref<any>(null)
 const replyScene = ref<'sales' | 'cs'>('sales')
 const replyBusy = ref(false)
+const asrBusy = ref(false)
+const asrHint = ref('下周周六上午方便来试听吗')
+const lastAsr = ref<string | null>(null)
 const customers = ref<any[]>([])
 const mockReply = ref('')
 const mockDirection = ref<'in' | 'out'>('in')
 const sseLog = ref('')
-let sseAbort: AbortController | null = null
-let reconnectTimer: number | null = null
+const weakTip = ref<{ text: string; priority?: string } | null>(null)
+const schedulePanel = ref<{ load: () => Promise<void> } | null>(null)
 
+const api = createApi(() => token.value)
 const draft = computed(() => profile.value?.draft)
 const confirmed = computed(() => profile.value?.confirmed)
 const generating = computed(() => !!profile.value?.generating)
 const recommendations = computed(() => tags.value?.recommendations)
 
-async function api(path: string, init: RequestInit = {}) {
-  const headers: Record<string, string> = {
-    ...(init.headers as Record<string, string> | undefined),
-  }
-  if (token.value) headers.Authorization = `Bearer ${token.value}`
-  if (init.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json'
-  const res = await fetch(`${apiBase}${path}`, { ...init, headers })
-  const json = await res.json()
-  if (json.code !== 0) throw new Error(json.message || '请求失败')
-  return json.data
-}
+const sse = createSseClient({
+  getToken: () => token.value,
+  getCustomerId: () => customerId.value,
+  onStatus: (msg) => {
+    status.value = msg
+  },
+  onEvent: async (ev, data) => {
+    sseLog.value = `${ev}: ${data}`
+    if (ev === 'weak_tip') {
+      try {
+        const payload = JSON.parse(data || '{}')
+        weakTip.value = {
+          text: payload.text || '日程提醒',
+          priority: payload.priority,
+        }
+        status.value = '收到弱提醒'
+      } catch {
+        weakTip.value = { text: data || '日程提醒' }
+      }
+      return
+    }
+    if (
+      ev === 'profile_draft' ||
+      ev === 'job_failed' ||
+      ev === 'reply_ready' ||
+      ev === 'tag_recommend' ||
+      ev === 'schedule_draft'
+    ) {
+      await refreshAll()
+      if (ev === 'schedule_draft') await schedulePanel.value?.load()
+      status.value =
+        ev === 'profile_draft'
+          ? '收到画像草稿'
+          : ev === 'reply_ready'
+            ? '收到话术建议'
+            : ev === 'tag_recommend'
+              ? '收到标签推荐'
+              : ev === 'schedule_draft'
+                ? '收到日程草稿'
+                : '生成失败'
+    }
+  },
+})
 
 async function loadCustomers() {
   const data = await api('/mock/customers')
@@ -59,7 +98,7 @@ async function exchange() {
     customerId.value = customers.value[0].id
   }
   await refreshAll()
-  connectSse()
+  sse.connect()
 }
 
 async function switchCustomer() {
@@ -68,7 +107,7 @@ async function switchCustomer() {
   if (selected?.external_id) externalUserId.value = selected.external_id
   status.value = `已切换客户 #${customerId.value}`
   await refreshAll()
-  connectSse()
+  sse.connect()
 }
 
 async function refreshAll() {
@@ -78,6 +117,7 @@ async function refreshAll() {
   profile.value = await api(`/sidebar/profile?${q}`)
   tags.value = await api(`/sidebar/tags?${q}`)
   reply.value = await api(`/sidebar/reply/latest?${q}&scene=${replyScene.value}`)
+  if (tab.value === 'schedule') await schedulePanel.value?.load()
 }
 
 async function suggestReply() {
@@ -101,7 +141,10 @@ async function suggestReply() {
   }
 }
 
-async function replyFeedback(action: 'copy' | 'adopt' | 'reject' | 'edit_adopt', text?: string) {
+async function replyFeedback(
+  action: 'copy' | 'adopt' | 'reject' | 'edit_adopt',
+  text?: string,
+) {
   if (!reply.value?.suggestion_id) return
   if (action === 'copy' && reply.value.primary) {
     try {
@@ -127,6 +170,31 @@ async function replyFeedback(action: 'copy' | 'adopt' | 'reject' | 'edit_adopt',
   reply.value = await api(
     `/sidebar/reply/latest?customer_id=${customerId.value}&scene=${replyScene.value}`,
   )
+}
+
+async function transcribeVoice() {
+  if (!customerId.value) return
+  asrBusy.value = true
+  status.value = '语音转写中…'
+  try {
+    const data = await api('/sidebar/asr/transcribe', {
+      method: 'POST',
+      body: JSON.stringify({
+        customer_id: customerId.value,
+        audio_ref: `mock://voice/${Date.now()}.wav`,
+        content_hint: asrHint.value || undefined,
+        create_message: true,
+      }),
+    })
+    lastAsr.value = data.asr_text || null
+    status.value = lastAsr.value ? `已转写：${lastAsr.value}` : '转写完成'
+    await refreshAll()
+  } catch (e: any) {
+    lastAsr.value = null
+    status.value = e?.message || '转写失败，不阻断文本建议'
+  } finally {
+    asrBusy.value = false
+  }
 }
 
 async function recommendTags() {
@@ -194,7 +262,7 @@ async function seedPhysicsScenario() {
   externalUserId.value = data.external_id || 'demo_physics'
   status.value = `场景就绪：客户 #${data.customer_id}`
   await refreshAll()
-  connectSse()
+  sse.connect()
 }
 
 async function generate() {
@@ -239,59 +307,6 @@ async function removeTag(customerTagId: number) {
   await refreshAll()
 }
 
-function connectSse() {
-  if (!token.value || !customerId.value) return
-  sseAbort?.abort()
-  const ctrl = new AbortController()
-  sseAbort = ctrl
-  void (async () => {
-    try {
-      const res = await fetch(
-        `${apiBase}/sidebar/sse?customer_id=${customerId.value}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token.value}`,
-            Accept: 'text/event-stream',
-          },
-          signal: ctrl.signal,
-        },
-      )
-      if (!res.body) return
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const parts = buf.split('\n\n')
-        buf = parts.pop() || ''
-        for (const part of parts) {
-          const ev = /event:\s*(\w+)/.exec(part)?.[1]
-          const dataLine = part.split('\n').find((l) => l.startsWith('data:'))
-          const data = dataLine ? dataLine.slice(5).trim() : ''
-          sseLog.value = `${ev}: ${data}`
-          if (ev === 'profile_draft' || ev === 'job_failed' || ev === 'reply_ready' || ev === 'tag_recommend') {
-            await refreshAll()
-            status.value =
-              ev === 'profile_draft'
-                ? '收到画像草稿'
-                : ev === 'reply_ready'
-                  ? '收到话术建议'
-                  : ev === 'tag_recommend'
-                    ? '收到标签推荐'
-                    : '生成失败'
-          }
-        }
-      }
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return
-      status.value = 'SSE 断开，重连中…'
-      reconnectTimer = window.setTimeout(connectSse, 2000)
-    }
-  })()
-}
-
 onMounted(() => {
   void exchange().catch((e) => {
     status.value = String(e.message || e)
@@ -299,8 +314,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  sseAbort?.abort()
-  if (reconnectTimer) window.clearTimeout(reconnectTimer)
+  sse.disconnect()
 })
 </script>
 
@@ -313,6 +327,13 @@ onUnmounted(() => {
       </div>
       <button type="button" @click="exchange">重新换票</button>
     </header>
+
+    <WeakTipBar
+      v-if="weakTip"
+      :text="weakTip.text"
+      :priority="weakTip.priority"
+      @dismiss="weakTip = null"
+    />
 
     <section class="card mock-panel">
       <div class="title-row">
@@ -347,8 +368,19 @@ onUnmounted(() => {
         />
         <button type="button" @click="sendMockReply">写入回复</button>
       </div>
+      <div class="title-row">
+        <input
+          v-model="asrHint"
+          class="grow"
+          placeholder="语音 content_hint（Fake ASR）"
+        />
+        <button type="button" :disabled="asrBusy" @click="transcribeVoice">
+          {{ asrBusy ? '转写中…' : '模拟语音转写' }}
+        </button>
+      </div>
+      <p v-if="lastAsr" class="muted">最近转写：{{ lastAsr }}</p>
       <p class="muted">
-        流程：切客户 / 写入回复 →「生成画像」。也可 POST /mock/customers、/mock/seed/scenario。
+        流程：切客户 / 写入回复 / 转写 → 生成画像 / 话术 / 日程。
       </p>
     </section>
 
@@ -367,7 +399,7 @@ onUnmounted(() => {
       <button :class="{ active: tab === 'profile' }" type="button" @click="tab = 'profile'">画像</button>
       <button :class="{ active: tab === 'tags' }" type="button" @click="tab = 'tags'">标签</button>
       <button :class="{ active: tab === 'suggest' }" type="button" @click="tab = 'suggest'">建议</button>
-      <button class="disabled" type="button" disabled>日程（三期）</button>
+      <button :class="{ active: tab === 'schedule' }" type="button" @click="tab = 'schedule'">日程</button>
     </nav>
 
     <section v-if="tab === 'profile'" class="card">
@@ -442,13 +474,16 @@ onUnmounted(() => {
         <h2>回复建议 <em class="ai">AI 建议</em></h2>
         <select v-model="replyScene" @change="refreshAll">
           <option value="sales">销售</option>
-          <option value="cs" disabled>客服（三期）</option>
+          <option value="cs">客服</option>
         </select>
         <button type="button" :disabled="replyBusy" @click="suggestReply">
           {{ replyBusy ? '生成中…' : '生成建议' }}
         </button>
       </div>
       <p class="muted">不会自动发送；请复制后到企微手动发送。</p>
+      <p v-if="reply?.based_on_asr || lastAsr" class="asr-banner">
+        基于转写：{{ reply?.based_on_asr || lastAsr }}
+      </p>
 
       <div v-if="reply?.primary">
         <h3>主建议</h3>
@@ -467,6 +502,14 @@ onUnmounted(() => {
       <p v-else class="muted">暂无建议。可点击「生成建议」。</p>
       <p class="muted">SSE：{{ sseLog || '等待连接…' }}</p>
     </section>
+
+    <SchedulePanel
+      v-show="tab === 'schedule'"
+      ref="schedulePanel"
+      :api="api"
+      :customer-id="customerId"
+      @status="(msg) => (status = msg)"
+    />
   </main>
 </template>
 
@@ -520,7 +563,6 @@ h2 { margin: 0; font-size: 1.05rem; }
   padding: 6px 10px;
 }
 .tabs button.active { background: #1f2a37; color: #fff; }
-.tabs button.disabled { opacity: 0.45; }
 button {
   border: 1px solid #d0d5dd;
   background: #fff;
@@ -531,6 +573,15 @@ button {
 button.primary { background: #175cd3; color: #fff; border-color: #175cd3; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 .ai { color: #6941c6; font-style: normal; font-size: 12px; margin-left: 6px; }
+.asr-banner {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #075985;
+  margin: 8px 0;
+  font-size: 13px;
+}
 pre {
   background: #f8fafc;
   border: 1px solid #e4e7ec;
