@@ -47,7 +47,14 @@ export function createSseClient(opts: {
         let buf = ''
         while (true) {
           const { done, value } = await reader.read()
-          if (done) break
+          if (done) {
+            // 服务端正常结束长连接时也重连，避免静默掉线
+            if (!ctrl.signal.aborted) {
+              opts.onStatus?.('SSE 结束，重连中…')
+              reconnectTimer = window.setTimeout(connect, 2000)
+            }
+            break
+          }
           buf += decoder.decode(value, { stream: true })
           const parts = buf.split('\n\n')
           buf = parts.pop() || ''

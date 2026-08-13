@@ -1,3 +1,5 @@
+"""FastAPI 应用入口：中间件、统一异常、路由挂载。"""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -21,16 +23,19 @@ from app.features.reply.router import router as reply_router
 from app.features.schedule.router import router as schedule_router
 from app.features.tag.router import router as tag_router
 from app.features.wecom.context_router import router as context_router
+from app.features.wecom.messages_router import router as messages_router
 from app.features.wecom.router import router as auth_router
 from app.features.wecom.sse_router import router as sse_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """应用生命周期钩子（当前无启动/关闭副作用）。"""
     yield
 
 
 def create_app() -> FastAPI:
+    """组装并返回 FastAPI 实例。"""
     settings = get_settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
@@ -42,14 +47,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.add_exception_handler(AppError, app_error_handler)
-    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    # type: ignore — pyright 与 Starlette ExceptionHandler 签名逆变不兼容（运行时正常）
+    app.add_exception_handler(AppError, app_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
 
     prefix = settings.api_prefix
 
     @app.get("/health")
     async def health():
+        """健康检查，附带 mock/LLM 开关便于联调确认环境。"""
         return ok(
             {
                 "service": settings.app_name,
@@ -61,10 +68,13 @@ def create_app() -> FastAPI:
 
     @app.get(f"{prefix}/hello")
     async def hello():
+        """探活示例接口。"""
         return ok({"hello": "K12-UserProfile", "phase": "mvp"})
 
+    # 侧边栏 / 企微 / 管理后台 / Mock 联调
     app.include_router(auth_router, prefix=prefix)
     app.include_router(context_router, prefix=prefix)
+    app.include_router(messages_router, prefix=prefix)
     app.include_router(sse_router, prefix=prefix)
     app.include_router(profile_router, prefix=prefix)
     app.include_router(tag_router, prefix=prefix)

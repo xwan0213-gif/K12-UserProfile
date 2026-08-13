@@ -1,4 +1,4 @@
-"""Schedule sidebar APIs: suggest / list / confirm / CRUD / remind / pref."""
+"""日程侧栏 API：建议生成、列表、确认、CRUD、提醒与偏好。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from app.features.schedule.remind import remind_schedule
 from app.features.schedule.schemas import (
     ConfirmBody,
     CreateBody,
+    DismissBody,
     PatchBody,
     PrefBody,
     RemindBody,
@@ -37,6 +38,7 @@ router = APIRouter(prefix="/sidebar/schedules", tags=["schedule"])
 async def _bg_run_schedule(
     job_id: int, customer_id: int, user_id: int | None
 ) -> None:
+    """后台任务：独立会话执行日程 AI 流水线。"""
     async with SessionLocal() as db:
         job = await db.get(AiJob, job_id)
         if job is None:
@@ -53,6 +55,7 @@ async def suggest_schedule(
     db: DbSession,
     background: BackgroundTasks,
 ) -> dict[str, Any]:
+    """创建或复用进行中的日程建议任务；force 可强制新建。"""
     await assert_customer_in_scope(db, user, body.customer_id)
     await job_svc.fail_stuck_jobs(
         db, customer_id=body.customer_id, task_type="schedule"
@@ -71,6 +74,7 @@ async def suggest_schedule(
         )
     ).scalar_one_or_none()
 
+    # 已有排队/运行中任务且未 force → 直接返回，避免重复排队
     if existing and not body.force:
         return ok({"job_id": existing.id, "status": existing.status})
 
@@ -88,6 +92,7 @@ async def suggest_schedule(
 
 @router.get("/pref")
 async def get_remind_pref(user: CurrentUser, db: DbSession) -> dict[str, Any]:
+    """读取当前用户的提醒偏好。"""
     row = await db.get(AppUser, user["id"])
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, "用户不存在", http_status=404)
@@ -100,6 +105,7 @@ async def patch_remind_pref(
     user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
+    """合并更新提醒偏好并写操作日志。"""
     row = await db.get(AppUser, user["id"])
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, "用户不存在", http_status=404)
@@ -123,6 +129,7 @@ async def list_schedules(
     customer_id: int | None = Query(default=None),
     scope: Literal["mine", "customer"] = Query(default="mine"),
 ) -> dict[str, Any]:
+    """列出已确认日程；指定客户时附带 pending/shown 建议草稿。"""
     if scope == "customer" and customer_id is None:
         raise AppError(ErrorCode.PARAM, "scope=customer 需要 customer_id", http_status=400)
 
@@ -133,6 +140,7 @@ async def list_schedules(
 
     if scope == "customer" and customer_id is not None:
         q = q.where(ScheduleItem.customer_id == customer_id)
+        # 非管理员仅看自己名下归属该客户的日程
         if user.get("role") != "admin":
             q = q.where(ScheduleItem.owner_user_id == user["id"])
     else:
@@ -158,6 +166,7 @@ async def list_schedules(
                 )
             ).scalars().all()
         )
+        # 首次展示将 pending 标为 shown，避免重复“新草稿”提示
         for d in drafts:
             if d.status == "pending":
                 d.status = "shown"
@@ -178,6 +187,7 @@ async def confirm_schedule(
     user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
+    """采纳建议或确认草稿日程；可选触发日历同步。"""
     if not body.suggestion_id and not body.schedule_id:
         raise AppError(
             ErrorCode.PARAM, "需要 suggestion_id 或 schedule_id", http_status=400
@@ -192,6 +202,7 @@ async def confirm_schedule(
             raise AppError(ErrorCode.NOT_FOUND, "日程建议不存在", http_status=404)
         await assert_customer_in_scope(db, user, suggestion.customer_id)
         content = dict(suggestion.content or {})
+        # edits 优先，否则回落到建议 content
         title = (edits.title if edits and edits.title else content.get("title")) or "跟进待办"
         start_at = (
             edits.start_at
@@ -249,6 +260,7 @@ async def confirm_schedule(
         customer_id = item.customer_id
 
     await apply_calendar_sync(item, body.sync_calendar)
+    # 同步成功但尚无外部 ID 时补占位，便于前端展示已同步态
     if item.sync_state == "synced" and not item.external_cal_id:
         item.external_cal_id = f"fake-cal-{item.id}"
 
@@ -270,12 +282,44 @@ async def confirm_schedule(
     return ok(serialize_item(item))
 
 
+@router.post("/dismiss")
+async def dismiss_schedule_draft(
+    body: DismissBody,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict[str, Any]:
+    """忽略 AI 日程草稿：suggestion → rejected，不创建站内待办。"""
+    suggestion = await db.get(Suggestion, body.suggestion_id)
+    if suggestion is None or suggestion.type != "schedule":
+        raise AppError(ErrorCode.NOT_FOUND, "日程建议不存在", http_status=404)
+    await assert_customer_in_scope(db, user, suggestion.customer_id)
+    if suggestion.status not in ("pending", "shown"):
+        raise AppError(
+            ErrorCode.PARAM,
+            f"当前状态不可忽略：{suggestion.status}",
+            http_status=400,
+        )
+    suggestion.status = "rejected"
+    await write_event(
+        db,
+        user_id=user["id"],
+        action="schedule_dismiss",
+        customer_id=suggestion.customer_id,
+        ref_type="suggestion",
+        ref_id=suggestion.id,
+        meta={"status": "rejected"},
+    )
+    await db.commit()
+    return ok({"suggestion_id": suggestion.id, "status": suggestion.status})
+
+
 @router.post("")
 async def create_schedule(
     body: CreateBody,
     user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
+    """手工新建已确认日程。"""
     await assert_customer_in_scope(db, user, body.customer_id)
     item = ScheduleItem(
         customer_id=body.customer_id,
@@ -315,6 +359,7 @@ async def patch_schedule(
     user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
+    """部分更新日程；非管理员仅可改自己拥有的记录。"""
     item = await db.get(ScheduleItem, schedule_id)
     if item is None:
         raise AppError(ErrorCode.NOT_FOUND, "日程不存在", http_status=404)
@@ -337,6 +382,7 @@ async def remind(
     user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
+    """按 mode 触发弱/强提醒。"""
     item = await db.get(ScheduleItem, schedule_id)
     if item is None:
         raise AppError(ErrorCode.NOT_FOUND, "日程不存在", http_status=404)

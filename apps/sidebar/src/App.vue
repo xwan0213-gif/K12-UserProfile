@@ -1,5 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import CapabilityBar from './components/CapabilityBar.vue'
+import CustomerHeader from './components/CustomerHeader.vue'
+import ChatPanel from './components/chat/ChatPanel.vue'
+import ProfilePanel from './components/profile/ProfilePanel.vue'
+import SuggestPanel from './components/suggest/SuggestPanel.vue'
+import type { ReplyOutcome } from './components/suggest/SuggestPanel.vue'
+import TagsPanel from './components/tags/TagsPanel.vue'
 import SchedulePanel from './components/SchedulePanel.vue'
 import WeakTipBar from './components/WeakTipBar.vue'
 import { createApi } from './composables/useApi'
@@ -10,27 +17,34 @@ const token = ref('')
 const customerId = ref<number | null>(null)
 const externalUserId = ref('demo_wang')
 const tab = ref<'profile' | 'tags' | 'suggest' | 'schedule'>('profile')
+const showChat = ref(true)
 const context = ref<any>(null)
 const profile = ref<any>(null)
 const tags = ref<any>(null)
 const reply = ref<any>(null)
 const replyScene = ref<'sales' | 'cs'>('sales')
 const replyBusy = ref(false)
-const asrBusy = ref(false)
-const asrHint = ref('下周周六上午方便来试听吗')
+const replyOutcome = ref<ReplyOutcome | null>(null)
+const tagRecommendBusy = ref(false)
 const lastAsr = ref<string | null>(null)
 const customers = ref<any[]>([])
-const mockReply = ref('')
-const mockDirection = ref<'in' | 'out'>('in')
 const sseLog = ref('')
 const weakTip = ref<{ text: string; priority?: string } | null>(null)
-const schedulePanel = ref<{ load: () => Promise<void> } | null>(null)
+const schedulePanel = ref<{
+  load: () => Promise<void>
+  suggest: () => Promise<void>
+} | null>(null)
+const chatPanel = ref<{ load: () => Promise<void> } | null>(null)
+const healthFlags = ref({
+  mockWecom: true,
+  mockLlm: false,
+  llmProvider: 'deepseek',
+  asr: 'Fake',
+  calendar: '降级',
+})
 
 const api = createApi(() => token.value)
-const draft = computed(() => profile.value?.draft)
-const confirmed = computed(() => profile.value?.confirmed)
 const generating = computed(() => !!profile.value?.generating)
-const recommendations = computed(() => tags.value?.recommendations)
 
 const sse = createSseClient({
   getToken: () => token.value,
@@ -60,6 +74,10 @@ const sse = createSseClient({
       ev === 'tag_recommend' ||
       ev === 'schedule_draft'
     ) {
+      if (ev === 'reply_ready') tab.value = 'suggest'
+      if (ev === 'tag_recommend') tab.value = 'tags'
+      if (ev === 'schedule_draft') tab.value = 'schedule'
+      if (ev === 'profile_draft') tab.value = 'profile'
       await refreshAll()
       if (ev === 'schedule_draft') await schedulePanel.value?.load()
       status.value =
@@ -75,6 +93,23 @@ const sse = createSseClient({
     }
   },
 })
+
+async function loadHealth() {
+  try {
+    const res = await fetch('/health')
+    const json = await res.json()
+    const d = json?.data || json
+    healthFlags.value = {
+      mockWecom: !!d.mock_wecom,
+      mockLlm: !!d.mock_llm,
+      llmProvider: d.llm_provider || 'deepseek',
+      asr: d.mock_llm ? 'Fake' : 'Fake/Stub',
+      calendar: '降级',
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 async function loadCustomers() {
   const data = await api('/mock/customers')
@@ -105,8 +140,10 @@ async function switchCustomer() {
   if (!customerId.value) return
   const selected = customers.value.find((c) => c.id === customerId.value)
   if (selected?.external_id) externalUserId.value = selected.external_id
+  replyOutcome.value = null
   status.value = `已切换客户 #${customerId.value}`
   await refreshAll()
+  await chatPanel.value?.load()
   sse.connect()
 }
 
@@ -117,12 +154,25 @@ async function refreshAll() {
   profile.value = await api(`/sidebar/profile?${q}`)
   tags.value = await api(`/sidebar/tags?${q}`)
   reply.value = await api(`/sidebar/reply/latest?${q}&scene=${replyScene.value}`)
+  if (
+    reply.value?.primary &&
+    reply.value?.suggestion_id !== replyOutcome.value?.suggestionId
+  ) {
+    replyOutcome.value = null
+  }
   if (tab.value === 'schedule') await schedulePanel.value?.load()
+}
+
+async function onSceneChange(scene: 'sales' | 'cs') {
+  replyScene.value = scene
+  replyOutcome.value = null
+  await refreshAll()
 }
 
 async function suggestReply() {
   if (!customerId.value) return
   replyBusy.value = true
+  replyOutcome.value = null
   status.value = '生成话术建议…'
   try {
     await api('/sidebar/reply/suggest', {
@@ -133,9 +183,15 @@ async function suggestReply() {
         force: true,
       }),
     })
-    reply.value = await api(
-      `/sidebar/reply/latest?customer_id=${customerId.value}&scene=${replyScene.value}`,
-    )
+    for (let i = 0; i < 40; i++) {
+      reply.value = await api(
+        `/sidebar/reply/latest?customer_id=${customerId.value}&scene=${replyScene.value}`,
+      )
+      if (reply.value?.primary) break
+      await new Promise((r) => setTimeout(r, 800))
+    }
+    if (reply.value?.based_on_asr) lastAsr.value = reply.value.based_on_asr
+    status.value = reply.value?.primary ? '已生成话术建议' : '话术生成中，请稍后查看'
   } finally {
     replyBusy.value = false
   }
@@ -146,95 +202,94 @@ async function replyFeedback(
   text?: string,
 ) {
   if (!reply.value?.suggestion_id) return
-  if (action === 'copy' && reply.value.primary) {
+  const suggestionId = reply.value.suggestion_id as number
+  const payloadText =
+    (text || '').trim() ||
+    (typeof reply.value.primary === 'string' ? reply.value.primary : '')
+
+  if (action === 'copy' && payloadText) {
     try {
-      await navigator.clipboard.writeText(reply.value.primary)
+      await navigator.clipboard.writeText(payloadText)
     } catch {
-      /* clipboard may be blocked */
+      /* ignore */
     }
   }
+
   await api('/sidebar/reply/feedback', {
     method: 'POST',
     body: JSON.stringify({
-      suggestion_id: reply.value.suggestion_id,
+      suggestion_id: suggestionId,
       action,
-      edited_content: action === 'edit_adopt' ? text || reply.value.primary : undefined,
+      edited_content: action === 'edit_adopt' ? payloadText : undefined,
     }),
   })
+
+  if (action === 'copy') {
+    replyOutcome.value = {
+      kind: 'copied',
+      text: payloadText,
+      suggestionId,
+    }
+    status.value = '已复制（请到企微手动发送，系统不代发）'
+    // copy 后 status 仍为 shown，保留当前建议
+    return
+  }
+
+  const kindMap = {
+    adopt: 'adopted',
+    reject: 'rejected',
+    edit_adopt: 'edit_adopted',
+  } as const
+
+  replyOutcome.value = {
+    kind: kindMap[action],
+    text: action === 'reject' ? payloadText || undefined : payloadText,
+    suggestionId,
+  }
   status.value =
-    action === 'copy'
-      ? '已复制（请到企微手动发送，系统不代发）'
-      : action === 'reject'
-        ? '已标记不适用'
-        : '已记录采纳'
+    action === 'reject'
+      ? '已标记不适用（不会代发）'
+      : action === 'edit_adopt'
+        ? '已按编辑稿标记有用（不会代发）'
+        : '已标记有用（不会代发）'
+
   reply.value = await api(
     `/sidebar/reply/latest?customer_id=${customerId.value}&scene=${replyScene.value}`,
   )
 }
 
-async function transcribeVoice() {
-  if (!customerId.value) return
-  asrBusy.value = true
-  status.value = '语音转写中…'
-  try {
-    const data = await api('/sidebar/asr/transcribe', {
-      method: 'POST',
-      body: JSON.stringify({
-        customer_id: customerId.value,
-        audio_ref: `mock://voice/${Date.now()}.wav`,
-        content_hint: asrHint.value || undefined,
-        create_message: true,
-      }),
-    })
-    lastAsr.value = data.asr_text || null
-    status.value = lastAsr.value ? `已转写：${lastAsr.value}` : '转写完成'
-    await refreshAll()
-  } catch (e: any) {
-    lastAsr.value = null
-    status.value = e?.message || '转写失败，不阻断文本建议'
-  } finally {
-    asrBusy.value = false
-  }
+function clearReplyOutcome() {
+  replyOutcome.value = null
 }
 
 async function recommendTags() {
-  if (!customerId.value) return
+  if (!customerId.value || tagRecommendBusy.value) return
+  tagRecommendBusy.value = true
   status.value = '生成标签推荐…'
-  await api('/sidebar/tags/recommend', {
-    method: 'POST',
-    body: JSON.stringify({ customer_id: customerId.value, force: true }),
-  })
+  try {
+    await api('/sidebar/tags/recommend', {
+      method: 'POST',
+      body: JSON.stringify({ customer_id: customerId.value, force: true }),
+    })
+    for (let i = 0; i < 40; i++) {
+      tags.value = await api(`/sidebar/tags?customer_id=${customerId.value}`)
+      if (tags.value?.recommendations) break
+      await new Promise((r) => setTimeout(r, 800))
+    }
+    status.value = tags.value?.recommendations
+      ? '已收到标签推荐'
+      : '标签推荐生成中，请稍后刷新'
+  } catch (e: any) {
+    status.value = e?.message || '标签推荐失败'
+  } finally {
+    tagRecommendBusy.value = false
+  }
+}
+
+async function refreshTags() {
+  if (!customerId.value) return
   tags.value = await api(`/sidebar/tags?customer_id=${customerId.value}`)
-}
-
-async function confirmTagRecommend(apply: boolean) {
-  const rec = recommendations.value
-  if (!rec?.suggestion_id) return
-  await api('/sidebar/tags/recommend/confirm', {
-    method: 'POST',
-    body: JSON.stringify({
-      suggestion_id: rec.suggestion_id,
-      apply_add: apply,
-      apply_remove: apply,
-    }),
-  })
-  status.value = apply ? '已确认标签推荐' : '已忽略标签推荐'
-  await refreshAll()
-}
-
-async function sendMockReply() {
-  if (!customerId.value || !mockReply.value.trim()) return
-  await api('/mock/messages', {
-    method: 'POST',
-    body: JSON.stringify({
-      customer_id: customerId.value,
-      direction: mockDirection.value,
-      content: mockReply.value.trim(),
-    }),
-  })
-  mockReply.value = ''
-  status.value = '已写入模拟回复'
-  await refreshAll()
+  context.value = await api(`/sidebar/context?customer_id=${customerId.value}`)
 }
 
 async function seedPhysicsScenario() {
@@ -262,6 +317,7 @@ async function seedPhysicsScenario() {
   externalUserId.value = data.external_id || 'demo_physics'
   status.value = `场景就绪：客户 #${data.customer_id}`
   await refreshAll()
+  await chatPanel.value?.load()
   sse.connect()
 }
 
@@ -272,42 +328,101 @@ async function generate() {
     method: 'POST',
     body: JSON.stringify({ customer_id: customerId.value, force: true }),
   })
-  profile.value = await api(`/sidebar/profile?customer_id=${customerId.value}`)
+  for (let i = 0; i < 40; i++) {
+    profile.value = await api(`/sidebar/profile?customer_id=${customerId.value}`)
+    if (profile.value?.draft) break
+    await new Promise((r) => setTimeout(r, 800))
+  }
 }
 
-async function confirm(mode: 'all' | 'discard', fields?: string[]) {
-  if (!draft.value) return
-  await api('/sidebar/profile/confirm', {
-    method: 'POST',
-    body: JSON.stringify({
-      draft_id: draft.value.id,
-      mode,
-      fields: fields || [],
-    }),
-  })
-  await refreshAll()
-  status.value = mode === 'discard' ? '已忽略草稿' : '已确认画像'
+async function confirm(mode: 'all' | 'discard') {
+  if (!profile.value?.draft) return
+  const hadConfirmed = Boolean(
+    profile.value?.confirmed &&
+      ['basic_info', 'study_info', 'prefer_info', 'timeline'].some((k) => {
+        const v = profile.value.confirmed[k]
+        if (v == null) return false
+        if (Array.isArray(v)) return v.length > 0
+        if (typeof v === 'object') return Object.keys(v).length > 0
+        return true
+      }),
+  )
+  try {
+    await api('/sidebar/profile/confirm', {
+      method: 'POST',
+      body: JSON.stringify({
+        draft_id: profile.value.draft.id,
+        mode,
+        fields: [],
+      }),
+    })
+    await refreshAll()
+    if (mode === 'discard') {
+      status.value = hadConfirmed
+        ? '已丢弃剩余草稿；已生效画像已保留'
+        : '已丢弃草稿；正式画像未变更'
+    } else {
+      status.value = '已全部确认并写入正式画像'
+    }
+  } catch (e: any) {
+    status.value = String(e?.message || e || '操作失败')
+  }
 }
 
 async function confirmField(field: string) {
-  if (!draft.value) return
-  await api('/sidebar/profile/confirm', {
-    method: 'POST',
-    body: JSON.stringify({
-      draft_id: draft.value.id,
-      mode: 'fields',
-      fields: [field],
-    }),
-  })
-  await refreshAll()
+  if (!profile.value?.draft) return
+  const titles: Record<string, string> = {
+    basic_info: '基本信息',
+    study_info: '学情',
+    prefer_info: '偏好',
+    timeline: '时间线',
+  }
+  try {
+    const data = await api('/sidebar/profile/confirm', {
+      method: 'POST',
+      body: JSON.stringify({
+        draft_id: profile.value.draft.id,
+        mode: 'fields',
+        fields: [field],
+      }),
+    })
+    await refreshAll()
+    if (data?.draft_status === 'merged') {
+      status.value = '四个分区均已确认并生效，草稿已合并'
+    } else {
+      status.value = `「${titles[field] || field}」已写入正式画像，其余分区仍待确认`
+    }
+  } catch (e: any) {
+    status.value = String(e?.message || e || '确认分区失败')
+  }
 }
 
-async function removeTag(customerTagId: number) {
-  await api(`/sidebar/tags/${customerTagId}`, { method: 'DELETE' })
-  await refreshAll()
+async function patchField(field: string, value: unknown) {
+  if (!profile.value?.draft) return
+  try {
+    await api('/sidebar/profile/draft', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        draft_id: profile.value.draft.id,
+        field,
+        value,
+      }),
+    })
+    await refreshAll()
+    status.value = '已保存草稿修改'
+  } catch (e: any) {
+    status.value = String(e?.message || e || '保存草稿失败')
+  }
+}
+
+async function suggestSchedule() {
+  if (!customerId.value) return
+  tab.value = 'schedule'
+  await schedulePanel.value?.suggest()
 }
 
 onMounted(() => {
+  void loadHealth()
   void exchange().catch((e) => {
     status.value = String(e.message || e)
   })
@@ -320,13 +435,33 @@ onUnmounted(() => {
 
 <template>
   <main class="page">
-    <header class="head">
+    <CapabilityBar :flags="healthFlags" />
+
+    <header class="top">
       <div>
-        <h1>擎天学智 · 侧边栏</h1>
+        <h1>侧边栏工作台</h1>
         <p class="sub">{{ status }}</p>
       </div>
-      <button type="button" @click="exchange">重新换票</button>
+      <div class="top-actions">
+        <button type="button" class="chat-toggle" @click="showChat = !showChat">
+          {{ showChat ? '隐藏会话' : '会话' }}
+        </button>
+        <button type="button" @click="seedPhysicsScenario">物理场景</button>
+        <button type="button" @click="exchange">重新换票</button>
+      </div>
     </header>
+
+    <div class="toolbar">
+      <label>
+        客户
+        <select v-model.number="customerId" @change="switchCustomer">
+          <option v-for="c in customers" :key="c.id" :value="c.id">
+            #{{ c.id }} {{ c.parent_name }}/{{ c.student_name || '—' }}
+          </option>
+        </select>
+      </label>
+      <span class="muted">SSE：{{ sseLog || '等待连接…' }}</span>
+    </div>
 
     <WeakTipBar
       v-if="weakTip"
@@ -335,269 +470,144 @@ onUnmounted(() => {
       @dismiss="weakTip = null"
     />
 
-    <section class="card mock-panel">
-      <div class="title-row">
-        <h2>Mock 演示</h2>
-        <button type="button" @click="seedPhysicsScenario">一键物理场景</button>
-      </div>
-      <div class="title-row">
-        <label>
-          external_userid
-          <input v-model="externalUserId" placeholder="demo_wang" />
-        </label>
-        <label>
-          客户
-          <select v-model.number="customerId" @change="switchCustomer">
-            <option v-for="c in customers" :key="c.id" :value="c.id">
-              #{{ c.id }} {{ c.parent_name }}/{{ c.student_name || '—' }}
-              ({{ c.external_id || 'no-ext' }})
-            </option>
-          </select>
-        </label>
-      </div>
-      <div class="title-row">
-        <select v-model="mockDirection">
-          <option value="in">客户回复 (in)</option>
-          <option value="out">顾问发送 (out)</option>
-        </select>
-        <input
-          v-model="mockReply"
-          class="grow"
-          placeholder="模拟一条聊天内容后生成画像"
-          @keyup.enter="sendMockReply"
+    <div class="bench" :class="{ 'chat-hidden': !showChat }">
+      <aside v-show="showChat" class="chat-col">
+        <ChatPanel
+          ref="chatPanel"
+          :api="api"
+          :customer-id="customerId"
+          @status="(msg) => (status = msg)"
+          @refreshed="refreshAll"
+          @goto-tab="(t) => (tab = t)"
+          @use-reply="suggestReply"
+          @use-schedule="suggestSchedule"
         />
-        <button type="button" @click="sendMockReply">写入回复</button>
-      </div>
-      <div class="title-row">
-        <input
-          v-model="asrHint"
-          class="grow"
-          placeholder="语音 content_hint（Fake ASR）"
-        />
-        <button type="button" :disabled="asrBusy" @click="transcribeVoice">
-          {{ asrBusy ? '转写中…' : '模拟语音转写' }}
-        </button>
-      </div>
-      <p v-if="lastAsr" class="muted">最近转写：{{ lastAsr }}</p>
-      <p class="muted">
-        流程：切客户 / 写入回复 / 转写 → 生成画像 / 话术 / 日程。
-      </p>
-    </section>
+      </aside>
 
-    <section v-if="context" class="card">
-      <div class="title-row">
-        <strong>{{ context.customer.parent_name }} / {{ context.customer.student_name }}</strong>
-        <span>{{ context.customer.grade }} · {{ context.customer.school }}</span>
-      </div>
-      <div class="tags">
-        <span v-for="t in context.tags" :key="t.id" class="chip">{{ t.name }}</span>
-      </div>
-      <p class="muted">顾问：{{ context.customer.owner_name || '—' }} · customer_id={{ customerId }}</p>
-    </section>
+      <section class="side-col">
+        <CustomerHeader :context="context" :customer-id="customerId" />
 
-    <nav class="tabs">
-      <button :class="{ active: tab === 'profile' }" type="button" @click="tab = 'profile'">画像</button>
-      <button :class="{ active: tab === 'tags' }" type="button" @click="tab = 'tags'">标签</button>
-      <button :class="{ active: tab === 'suggest' }" type="button" @click="tab = 'suggest'">建议</button>
-      <button :class="{ active: tab === 'schedule' }" type="button" @click="tab = 'schedule'">日程</button>
-    </nav>
+        <nav class="tabs">
+          <button :class="{ active: tab === 'profile' }" type="button" @click="tab = 'profile'">画像</button>
+          <button :class="{ active: tab === 'tags' }" type="button" @click="tab = 'tags'">标签</button>
+          <button :class="{ active: tab === 'suggest' }" type="button" @click="tab = 'suggest'">建议</button>
+          <button :class="{ active: tab === 'schedule' }" type="button" @click="tab = 'schedule'">日程</button>
+        </nav>
 
-    <section v-if="tab === 'profile'" class="card">
-      <div class="title-row">
-        <h2>客户画像 <em class="ai">AI 建议</em></h2>
-        <button type="button" :disabled="generating" @click="generate">
-          {{ generating ? '生成中…' : '生成画像' }}
-        </button>
-      </div>
-
-      <div v-if="draft" class="draft">
-        <p class="muted">
-          置信度 {{ draft.confidence ?? '—' }} ·
-          来源 {{ (draft.sources || []).map((s: any) => s.label || s.type).join(' / ') || '—' }}
-        </p>
-        <div v-for="field in ['basic_info', 'study_info', 'prefer_info', 'timeline']" :key="field" class="block">
-          <div class="title-row">
-            <strong>{{ field }}</strong>
-            <button type="button" @click="confirmField(field)">确认本区</button>
-          </div>
-          <pre>{{ JSON.stringify(draft[field], null, 2) }}</pre>
+        <div class="side-body card">
+          <ProfilePanel
+            v-if="tab === 'profile'"
+            :profile="profile"
+            :generating="generating"
+            @generate="generate"
+            @confirm="confirm"
+            @confirm-field="confirmField"
+            @patch-field="patchField"
+          />
+          <TagsPanel
+            v-else-if="tab === 'tags'"
+            :api="api"
+            :customer-id="customerId"
+            :tags="tags"
+            :recommend-busy="tagRecommendBusy"
+            @recommend="recommendTags"
+            @status="(msg) => (status = msg)"
+            @refreshed="refreshTags"
+          />
+          <SuggestPanel
+            v-else-if="tab === 'suggest'"
+            :reply="reply"
+            :reply-scene="replyScene"
+            :reply-busy="replyBusy"
+            :last-asr="lastAsr"
+            :outcome="replyOutcome"
+            @update:reply-scene="onSceneChange"
+            @suggest="suggestReply"
+            @feedback="replyFeedback"
+            @clear-outcome="clearReplyOutcome"
+            @status="(msg) => (status = msg)"
+          />
+          <SchedulePanel
+            v-show="tab === 'schedule'"
+            ref="schedulePanel"
+            :api="api"
+            :customer-id="customerId"
+            @status="(msg) => (status = msg)"
+          />
         </div>
-        <div class="actions">
-          <button type="button" class="primary" @click="confirm('all')">全部确认</button>
-          <button type="button" @click="confirm('discard')">忽略草稿</button>
-        </div>
-      </div>
-      <p v-else class="muted">暂无草稿。可点击「生成画像」。</p>
-
-      <h3>已确认</h3>
-      <pre v-if="confirmed">{{ JSON.stringify(confirmed, null, 2) }}</pre>
-      <p v-else class="muted">尚无已确认画像</p>
-      <p class="muted">SSE：{{ sseLog || '等待连接…' }}</p>
-    </section>
-
-    <section v-else-if="tab === 'tags'" class="card">
-      <div class="title-row">
-        <h2>标签 <em class="ai">AI 建议</em></h2>
-        <button type="button" @click="recommendTags">生成推荐</button>
-      </div>
-      <ul class="list">
-        <li v-for="t in tags?.active || []" :key="t.customer_tag_id">
-          <div>
-            <strong>{{ t.name }}</strong>
-            <p class="muted">{{ t.sop_text || '无 SOP' }}</p>
-          </div>
-          <button type="button" @click="removeTag(t.customer_tag_id)">移除</button>
-        </li>
-      </ul>
-
-      <div v-if="recommendations" class="block">
-        <h3>推荐草稿 #{{ recommendations.suggestion_id }}</h3>
-        <p class="muted">确认前不会写入正式标签</p>
-        <div v-for="(a, i) in recommendations.add || []" :key="'a'+i" class="chip-row">
-          <span class="chip">+ {{ a.tag_name || a.name }}</span>
-          <span class="muted">{{ a.reason }}</span>
-        </div>
-        <div v-for="(a, i) in recommendations.remove || []" :key="'r'+i" class="chip-row">
-          <span class="chip danger">- {{ a.tag_name || a.name }}</span>
-          <span class="muted">{{ a.reason }}</span>
-        </div>
-        <div class="actions">
-          <button type="button" class="primary" @click="confirmTagRecommend(true)">确认推荐</button>
-          <button type="button" @click="confirmTagRecommend(false)">忽略</button>
-        </div>
-      </div>
-      <p v-else class="muted">暂无 AI 标签推荐。可点「生成推荐」。</p>
-    </section>
-
-    <section v-else-if="tab === 'suggest'" class="card">
-      <div class="title-row">
-        <h2>回复建议 <em class="ai">AI 建议</em></h2>
-        <select v-model="replyScene" @change="refreshAll">
-          <option value="sales">销售</option>
-          <option value="cs">客服</option>
-        </select>
-        <button type="button" :disabled="replyBusy" @click="suggestReply">
-          {{ replyBusy ? '生成中…' : '生成建议' }}
-        </button>
-      </div>
-      <p class="muted">不会自动发送；请复制后到企微手动发送。</p>
-      <p v-if="reply?.based_on_asr || lastAsr" class="asr-banner">
-        基于转写：{{ reply?.based_on_asr || lastAsr }}
-      </p>
-
-      <div v-if="reply?.primary">
-        <h3>主建议</h3>
-        <pre>{{ reply.primary }}</pre>
-        <div class="actions">
-          <button type="button" class="primary" @click="replyFeedback('copy')">复制</button>
-          <button type="button" @click="replyFeedback('adopt')">采纳</button>
-          <button type="button" @click="replyFeedback('edit_adopt', reply.primary)">编辑后采纳</button>
-          <button type="button" @click="replyFeedback('reject')">不适用</button>
-        </div>
-        <div v-if="(reply.alternatives || []).length" class="block">
-          <h3>备选</h3>
-          <pre v-for="(alt, i) in reply.alternatives" :key="i">{{ alt }}</pre>
-        </div>
-      </div>
-      <p v-else class="muted">暂无建议。可点击「生成建议」。</p>
-      <p class="muted">SSE：{{ sseLog || '等待连接…' }}</p>
-    </section>
-
-    <SchedulePanel
-      v-show="tab === 'schedule'"
-      ref="schedulePanel"
-      :api="api"
-      :customer-id="customerId"
-      @status="(msg) => (status = msg)"
-    />
+      </section>
+    </div>
   </main>
 </template>
 
 <style scoped>
 .page {
-  max-width: 720px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 16px;
-  font-family: "Segoe UI", "PingFang SC", sans-serif;
-  color: #1f2a37;
+  padding: 14px 16px 24px;
 }
-.head, .title-row, .actions, .tabs {
+.top, .top-actions, .toolbar, .tabs {
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
 }
-.head { justify-content: space-between; margin-bottom: 12px; }
-h1 { margin: 0; font-size: 1.25rem; }
-h2 { margin: 0; font-size: 1.05rem; }
-.sub, .muted { color: #667085; margin: 4px 0; }
-.card {
-  background: rgba(255,255,255,0.9);
-  border: 1px solid #e4e7ec;
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 12px;
+.top { justify-content: space-between; margin-bottom: 8px; }
+h1 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-family: var(--font-display);
 }
-.mock-panel input, .mock-panel select {
-  border: 1px solid #d0d5dd;
+.sub { color: var(--muted); margin: 4px 0 0; font-size: 13px; }
+.toolbar {
+  margin-bottom: 10px;
+  justify-content: space-between;
+}
+.toolbar select {
+  margin-left: 6px;
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 6px 8px;
-  font: inherit;
 }
-.mock-panel .grow { flex: 1; min-width: 180px; }
-.chip {
-  display: inline-block;
-  background: #eef4ff;
-  color: #3538cd;
-  border-radius: 999px;
-  padding: 2px 10px;
-  margin: 2px 4px 2px 0;
-  font-size: 12px;
+.bench {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.1fr) minmax(300px, 0.9fr);
+  gap: 12px;
+  align-items: stretch;
 }
-.chip.danger { background: #fef3f2; color: #b42318; }
-.chip-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 4px 0; }
-.tabs button {
-  border: 1px solid #d0d5dd;
-  background: #fff;
-  border-radius: 8px;
-  padding: 6px 10px;
+.bench.chat-hidden {
+  grid-template-columns: 1fr;
 }
-.tabs button.active { background: #1f2a37; color: #fff; }
-button {
-  border: 1px solid #d0d5dd;
-  background: #fff;
-  border-radius: 8px;
-  padding: 6px 10px;
-  cursor: pointer;
+.chat-col { min-height: 520px; }
+.side-col { min-width: 0; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  box-shadow: var(--shadow);
 }
-button.primary { background: #175cd3; color: #fff; border-color: #175cd3; }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-.ai { color: #6941c6; font-style: normal; font-size: 12px; margin-left: 6px; }
-.asr-banner {
-  background: #f0f9ff;
-  border: 1px solid #bae6fd;
-  border-radius: 8px;
-  padding: 8px 10px;
-  color: #075985;
-  margin: 8px 0;
-  font-size: 13px;
+.tabs { margin-bottom: 8px; }
+.tabs button.active {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
 }
-pre {
-  background: #f8fafc;
-  border: 1px solid #e4e7ec;
-  border-radius: 8px;
-  padding: 8px;
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
+.side-body { min-height: 420px; }
+.chat-toggle {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
-.block { margin: 10px 0; }
-.list { list-style: none; padding: 0; margin: 0; }
-.list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid #eef2f6;
+
+@media (max-width: 900px) {
+  .bench {
+    grid-template-columns: 1fr;
+  }
+  .chat-col {
+    order: 2;
+    min-height: 360px;
+  }
+  .side-col { order: 1; }
 }
 </style>
