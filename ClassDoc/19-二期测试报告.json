@@ -9,7 +9,7 @@
       "id": "INFRA-01",
       "name": "API health",
       "ok": true,
-      "detail": "{\"service\": \"K12-UserProfile\", \"mock_wecom\": true, \"mock_llm\": false, \"llm_provider\": \"deepseek\"}"
+      "detail": "{\"service\": \"K12-UserProfile\", \"mock_wecom\": true, \"mock_llm\": false, \"llm_provider\": \"deepseek\", \"asr_provider\": \"fake\", \"calendar_mode\": \"degraded\", \"calendar_hint\": \"企微日历未接入（Mock 或缺 corp/secret），同步将降级\"}"
     },
     {
       "id": "INFRA-02",
@@ -39,19 +39,19 @@
       "id": "P2-SEED-02",
       "name": "tag catalog loaded (>=15)",
       "ok": true,
-      "detail": "count=45"
+      "detail": "count=47"
     },
     {
       "id": "P2-SEED-03",
       "name": "script templates loaded (>=20)",
       "ok": true,
-      "detail": "count=124"
+      "detail": "count=125"
     },
     {
       "id": "P2-ADMIN-01",
       "name": "create script template",
       "ok": true,
-      "detail": "{\"id\": 125}"
+      "detail": "{\"id\": 126}"
     },
     {
       "id": "P2-AUTH-02",
@@ -63,13 +63,13 @@
       "id": "P2-SEED-04",
       "name": "senior scenario customer",
       "ok": true,
-      "detail": "{\"created\": true, \"customer_id\": 4, \"external_id\": \"p2_test_senior\", \"parent_name\": \"测试高中家长\", \"student_name\": \"测试高中生\", \"message_ids\": [18, 19, 20], \"hint\": \"POST /sidebar/profile/generate with this customer_id\"}"
+      "detail": "{\"created\": false, \"customer_id\": 4, \"external_id\": \"p2_test_senior\", \"parent_name\": \"测试高中家长\", \"student_name\": \"测试高中生\", \"message_ids\": [53, 54, 55], \"hint\": \"POST /sidebar/profile/generate with this customer_id\"}"
     },
     {
       "id": "T-R-00a",
       "name": "reply suggest junior queued",
       "ok": true,
-      "detail": "{\"job_id\": 25, \"status\": \"queued\"}"
+      "detail": "{\"job_id\": 76, \"status\": \"queued\"}"
     },
     {
       "id": "T-R-00b",
@@ -81,7 +81,7 @@
       "id": "T-R-00c",
       "name": "reply suggest senior queued",
       "ok": true,
-      "detail": "{\"job_id\": 26, \"status\": \"queued\"}"
+      "detail": "{\"job_id\": 77, \"status\": \"queued\"}"
     },
     {
       "id": "T-R-01",
@@ -99,55 +99,55 @@
       "id": "T-R-03a",
       "name": "adoption endpoint before",
       "ok": true,
-      "detail": "{\"items\": [{\"user_id\": 3, \"name\": \"李顾问\", \"impressions\": 7, \"adopt\": 0, \"reject\": 0, \"edit_adopt\": 0, \"copy\": 0, \"tag_confirm\": 0, \"tag_reject\": 0, \"day\": null, \"adoption_rate\": 0.0}], \"group_by\": \"advisor\"}"
+      "detail": "{\"items\": [{\"user_id\": 3, \"name\": \"李顾问\", \"impressions\": 46, \"adopt\": 2, \"reject\": 2, \"edit_adopt\": 3, \"copy\": 4, \"tag_confirm\": 6, \"tag_reject\": 4, \"day\": null, \"adoption_rate\": 0.7143}], \"group_by\": \"advisor\"}"
     },
     {
       "id": "T-R-02b",
       "name": "feedback copy recorded",
       "ok": true,
-      "detail": "{\"suggestion_id\": 2, \"status\": \"shown\"}"
+      "detail": "{\"suggestion_id\": 49, \"status\": \"shown\"}"
     },
     {
       "id": "T-R-03b",
       "name": "feedback adopt recorded",
       "ok": true,
-      "detail": "{\"suggestion_id\": 2, \"status\": \"adopted\"}"
+      "detail": "{\"suggestion_id\": 49, \"status\": \"adopted\"}"
     },
     {
       "id": "T-R-03",
       "name": "adoption metrics change after feedback",
       "ok": true,
-      "detail": "before_copy=0 before_adopt=0 after_copy=1 after_adopt=1"
+      "detail": "before_copy=4 before_adopt=2 after_copy=5 after_adopt=3"
     },
     {
       "id": "T-T-00",
       "name": "tag recommend queued",
       "ok": true,
-      "detail": "{\"job_id\": 28, \"status\": \"queued\"}"
+      "detail": "{\"job_id\": 80, \"status\": \"queued\"}"
     },
     {
       "id": "T-T-02",
       "name": "recommendation reasons visible",
       "ok": true,
-      "detail": "{\"suggestion_id\": 4, \"status\": \"shown\", \"add\": [{\"reason\": \"连续咨询并提到试听\", \"tag_name\": \"近期决策\"}, {\"reason\": \"客户学段为初中\", \"tag_name\": \"初中\"}], \"remove\": []}"
+      "detail": "{\"suggestion_id\": 52, \"status\": \"shown\", \"add\": [{\"reason\": \"基于近窗上下文的默认推荐\", \"tag_name\": \"价格敏感\"}], \"remove\": [{\"reason\": \"已进入深度咨询\", \"tag_name\": \"刚加微信\"}]}"
     },
     {
       "id": "T-T-01a",
       "name": "recommend draft does not write formal tags yet",
       "ok": true,
-      "detail": "new_adds=['近期决策', '初中'] leaked=[] active_mid=['数学薄弱', '高意向']"
+      "detail": "new_adds=['价格敏感'] leaked=[] active_mid=['刚加微信', '初中', '基础知识薄弱', '数学薄弱', '近期决策', '高意向']"
     },
     {
       "id": "T-T-01b",
       "name": "confirm recommendation",
       "ok": true,
-      "detail": "{\"suggestion_id\": 4, \"status\": \"adopted\", \"added\": [\"初中\", \"近期决策\"], \"removed\": []}"
+      "detail": "{\"suggestion_id\": 52, \"status\": \"adopted\", \"added\": [\"价格敏感\"], \"removed\": []}"
     },
     {
       "id": "T-T-01",
       "name": "tags applied only after confirm",
       "ok": true,
-      "detail": "new_adds=['近期决策', '初中'] after=['初中', '数学薄弱', '近期决策', '高意向']"
+      "detail": "new_adds=['价格敏感'] after=['价格敏感', '刚加微信', '初中', '基础知识薄弱', '数学薄弱', '近期决策', '高意向']"
     },
     {
       "id": "T-T-03",

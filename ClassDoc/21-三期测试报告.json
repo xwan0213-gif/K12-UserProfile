@@ -8,7 +8,7 @@
     {
       "id": "INFRA",
       "ok": true,
-      "detail": "{\"service\": \"K12-UserProfile\", \"mock_wecom\": true, \"mock_llm\": false, \"llm_provider\": \"deepseek\"}"
+      "detail": "{\"service\": \"K12-UserProfile\", \"mock_wecom\": true, \"mock_llm\": false, \"llm_provider\": \"deepseek\", \"asr_provider\": \"fake\", \"calendar_mode\": \"degraded\", \"calendar_hint\": \"企微日历未接入（Mock 或缺 corp/secret），同步将降级\"}"
     },
     {
       "id": "AUTH",
@@ -18,12 +18,12 @@
     {
       "id": "T-R-04a",
       "ok": true,
-      "detail": "{\"asr_text\": \"下周周六上午方便来试听吗\", \"message_id\": 28, \"customer_id\": 1}"
+      "detail": "{\"asr_text\": \"下周周六上午方便来试听吗\", \"message_id\": 61, \"customer_id\": 1}"
     },
     {
       "id": "T-R-05a",
       "ok": true,
-      "detail": "{\"job_id\": 42, \"status\": \"queued\"}"
+      "detail": "{\"job_id\": 83, \"status\": \"queued\"}"
     },
     {
       "id": "T-R-05",
@@ -33,17 +33,17 @@
     {
       "id": "T-R-05b",
       "ok": true,
-      "detail": "{\"job_id\": 43, \"status\": \"queued\"}"
+      "detail": "{\"job_id\": 84, \"status\": \"queued\"}"
     },
     {
       "id": "T-S-01a",
       "ok": true,
-      "detail": "{\"job_id\": 44, \"status\": \"queued\"}"
+      "detail": "{\"job_id\": 85, \"status\": \"queued\"}"
     },
     {
       "id": "T-S-01",
       "ok": true,
-      "detail": "{\"suggestion_id\": 23, \"title\": \"试听安排/回访确认\", \"time_text\": \"下周六 待定\", \"start_at\": null, \"priority\": \"high\", \"source_quote\": \"下周六上午我们过来试听，记得提醒我\", \"predictive_tip\": \"试听后建议 48h 内回访，确认意向与档期\", \"status\": \"shown\", \"created_at\": \"2026-08-12T06:20:21.987531+00:00Z\"}"
+      "detail": "{\"suggestion_id\": 56, \"title\": \"试听安排/回访确认\", \"time_text\": \"下周六 待定\", \"start_at\": null, \"priority\": \"high\", \"source_quote\": \"下周六上午我们过来试听，记得提醒我\", \"predictive_tip\": \"试听后建议 48h 内回访，确认意向与档期\", \"status\": \"shown\", \"created_at\": \"2026-08-13T13:49:40.836950+00:00Z\"}"
     },
     {
       "id": "T-S-04a",
@@ -58,7 +58,7 @@
     {
       "id": "T-S-02",
       "ok": true,
-      "detail": "{\"id\": 6, \"customer_id\": 1, \"owner_user_id\": 3, \"title\": \"试听安排/回访确认\", \"start_at\": null, \"end_at\": null, \"priority\": \"high\", \"status\": \"confirmed\", \"sync_state\": \"failed\", \"external_cal_id\": null, \"source\": \"ai\", \"suggestion_id\": 23, \"remark\": \"试听后建议 48h 内回访，确认意向与档期\", \"created_at\": \"2026-08-12T08:42:"
+      "detail": "{\"id\": 12, \"customer_id\": 1, \"owner_user_id\": 3, \"title\": \"试听安排/回访确认\", \"start_at\": null, \"end_at\": null, \"priority\": \"high\", \"status\": \"confirmed\", \"sync_state\": \"failed\", \"external_cal_id\": null, \"source\": \"ai\", \"suggestion_id\": 56, \"remark\": \"试听后建议 48h 内回访，确认意向与档期\", \"created_at\": \"2026-08-13T13:49"
     },
     {
       "id": "T-S-02b",
@@ -68,22 +68,22 @@
     {
       "id": "T-S-02c",
       "ok": true,
-      "detail": "count=5"
+      "detail": "count=2"
     },
     {
       "id": "T-S-03a",
       "ok": true,
-      "detail": "{\"delivered\": true, \"degraded\": false, \"message\": \"弱提示已推送\", \"schedule_id\": 6}"
+      "detail": "{\"delivered\": true, \"degraded\": false, \"message\": \"弱提示已推送\", \"schedule_id\": 12}"
     },
     {
       "id": "T-S-03",
       "ok": true,
-      "detail": "{\"delivered\": false, \"degraded\": true, \"message\": \"强提醒已关闭\", \"schedule_id\": 6}"
+      "detail": "{\"delivered\": false, \"degraded\": true, \"message\": \"强提醒已关闭\", \"schedule_id\": 12}"
     },
     {
       "id": "T-R-04",
       "ok": true,
-      "detail": "{\"based_on_asr\": \"下周六上午我们过来试听，记得提醒我\", \"primary\": \"王女士您好，结合王小明（初二）近期数学情况，建议先安排一次针对性诊断/试听，再讨论班型与价格。\"}"
+      "detail": "{\"based_on_asr\": \"MVP测试追加消息 1786628976，数学仍需夯实基础想试听\", \"primary\": \"王女士您好，结合王小明（初二）近期数学情况，建议先安排一次针对性诊断/试听，再讨论班型与价格。\"}"
     }
   ]
 }
