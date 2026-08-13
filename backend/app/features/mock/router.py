@@ -1,3 +1,5 @@
+"""Mock / 演示数据路由：种子组织用户、模拟客户/消息/订单，仅用于联调与演示。"""
+
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,19 +28,22 @@ router = APIRouter(prefix="/mock", tags=["mock"])
 
 
 def _utcnow_naive() -> datetime:
-    """DB columns are TIMESTAMP WITHOUT TIME ZONE; store UTC as naive."""
+    """返回当前 UTC 时间的 naive datetime（库表为 TIMESTAMP WITHOUT TIME ZONE）。"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _naive_msg_time(msg_time: datetime | None) -> datetime:
+    """将消息时间规范为 naive UTC；缺省则取当前时间。"""
     if msg_time is None:
         return _utcnow_naive()
+    # 去掉时区信息，与 DB 列类型对齐
     if msg_time.tzinfo is not None:
         return msg_time.replace(tzinfo=None)
     return msg_time
 
 
 async def _default_advisor(db: DbSession) -> AppUser:
+    """取一名可用顾问；若无则提示先执行 seed/demo。"""
     result = await db.execute(
         select(AppUser).where(
             AppUser.role == "advisor",
@@ -57,6 +62,8 @@ async def _default_advisor(db: DbSession) -> AppUser:
 
 
 class MockMessageBody(BaseModel):
+    """模拟聊天消息请求体。"""
+
     customer_id: int
     direction: str = "in"
     msg_type: str = "text"
@@ -66,6 +73,8 @@ class MockMessageBody(BaseModel):
 
 
 class MockOrderBody(BaseModel):
+    """模拟订单请求体。"""
+
     customer_id: int
     title: str
     amount: float = 0
@@ -74,6 +83,8 @@ class MockOrderBody(BaseModel):
 
 
 class MockCustomerBody(BaseModel):
+    """创建模拟客户请求体。"""
+
     parent_name: str
     student_name: str | None = None
     grade: str | None = None
@@ -86,6 +97,8 @@ class MockCustomerBody(BaseModel):
 
 
 class ScenarioMessage(BaseModel):
+    """场景种子中的单条聊天消息。"""
+
     direction: str = "in"
     msg_type: str = "text"
     content: str
@@ -93,7 +106,7 @@ class ScenarioMessage(BaseModel):
 
 
 class MockScenarioBody(BaseModel):
-    """Create (or reuse by external_id) a customer and seed chat lines."""
+    """按场景创建（或按 external_id 复用）客户并灌入聊天记录。"""
 
     parent_name: str
     student_name: str | None = None
@@ -109,11 +122,15 @@ class MockScenarioBody(BaseModel):
     cs_summary: str | None = None
 
 
+# ---------- 种子演示数据 ----------
+
+
 @router.post("/seed/demo")
 async def seed_demo(db: DbSession) -> dict[str, Any]:
-    """Seed org / 三角色 / 演示客户（王女士）/ tags — scaffold shell with real rows."""
+    """种子：组织 / 三角色账号 / 演示客户（王女士）/ 标签与话术模板。"""
     settings = get_settings()
 
+    # 已存在 HQ 组织则视为已播种，避免重复插入
     existing = await db.execute(select(Org).where(Org.code == "HQ"))
     if existing.scalar_one_or_none():
         return ok({"seeded": False, "message": "demo data already exists"})
@@ -205,7 +222,7 @@ async def seed_demo(db: DbSession) -> dict[str, Any]:
     db.add(customer)
     await db.flush()
 
-    # bind demo tags: 高意向 / 数学薄弱 / 初中
+    # 绑定演示标签：高意向 / 数学薄弱 / 初中
     for tag in tags[:3]:
         db.add(
             CustomerTag(
@@ -276,11 +293,15 @@ async def seed_demo(db: DbSession) -> dict[str, Any]:
     )
 
 
+# ---------- 模拟客户 ----------
+
+
 @router.get("/customers")
 async def list_mock_customers(
     db: DbSession,
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
+    """列出未删除的客户（按 id 倒序，带 limit）。"""
     rows = (
         await db.execute(
             select(Customer)
@@ -313,6 +334,7 @@ async def list_mock_customers(
 async def create_mock_customer(
     body: MockCustomerBody, db: DbSession
 ) -> dict[str, Any]:
+    """创建模拟客户；external_id 冲突时返回 409。"""
     if body.external_id:
         existing = (
             await db.execute(
@@ -330,6 +352,7 @@ async def create_mock_customer(
                 http_status=409,
             )
 
+    # 未指定归属顾问或组织时，回落到默认顾问
     advisor = None
     if body.owner_user_id is None or body.org_id is None:
         advisor = await _default_advisor(db)
@@ -368,7 +391,7 @@ async def create_mock_customer(
 
 @router.post("/seed/scenario")
 async def seed_scenario(body: MockScenarioBody, db: DbSession) -> dict[str, Any]:
-    """Upsert customer by external_id (if given) and seed mock chat messages."""
+    """按 external_id 复用或新建客户，并灌入模拟聊天与客服摘要。"""
     customer: Customer | None = None
     created = False
     if body.external_id:
@@ -405,7 +428,7 @@ async def seed_scenario(body: MockScenarioBody, db: DbSession) -> dict[str, Any]
         await db.flush()
         created = True
     else:
-        # refresh profile fields for demo convenience
+        # 已存在则刷新画像字段，便于反复演示同一场景
         customer.parent_name = body.parent_name
         if body.student_name is not None:
             customer.student_name = body.student_name
@@ -421,6 +444,7 @@ async def seed_scenario(body: MockScenarioBody, db: DbSession) -> dict[str, Any]
 
     message_ids: list[int] = []
     if body.messages:
+        # append_messages=False 且非新建时，先清空该客户历史消息再写入
         if not body.append_messages and not created:
             old = (
                 await db.execute(
@@ -476,8 +500,12 @@ async def seed_scenario(body: MockScenarioBody, db: DbSession) -> dict[str, Any]
     )
 
 
+# ---------- 模拟消息 / 订单 ----------
+
+
 @router.post("/messages")
 async def mock_messages(body: MockMessageBody, db: DbSession) -> dict[str, Any]:
+    """写入一条模拟聊天消息，并更新客户最近联系时间。"""
     customer = await db.get(Customer, body.customer_id)
     if customer is None or customer.deleted_at is not None:
         raise AppError(ErrorCode.NOT_FOUND, "客户不存在", http_status=404)
@@ -500,6 +528,7 @@ async def mock_messages(body: MockMessageBody, db: DbSession) -> dict[str, Any]:
 
 @router.post("/orders")
 async def mock_orders(body: MockOrderBody, db: DbSession) -> dict[str, Any]:
+    """写入一条模拟订单；status=paid 时自动填 paid_at。"""
     customer = await db.get(Customer, body.customer_id)
     if customer is None or customer.deleted_at is not None:
         raise AppError(ErrorCode.NOT_FOUND, "客户不存在", http_status=404)

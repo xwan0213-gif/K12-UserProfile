@@ -1,4 +1,4 @@
-"""Reply AI pipeline: context → LLM → Suggestion → SSE. Never sends WeCom messages."""
+"""话术建议 AI 流水线：上下文 → LLM → Suggestion → SSE。绝不主动发送企微消息。"""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from app.features.ai.gateway import get_gateway
 async def load_reply_context(
     db: AsyncSession, customer_id: int, scene: str
 ) -> dict[str, Any]:
+    """加载话术生成上下文：客户、画像摘要、近窗聊天与匹配场景/阶段的话术模板。"""
     customer = await db.get(Customer, customer_id)
     profile = (
         await db.execute(
@@ -41,6 +42,7 @@ async def load_reply_context(
     ).scalars().all()
 
     stage = getattr(customer, "stage", None) if customer else None
+    # 启用模板：场景匹配，且阶段相等或模板未限定阶段
     templates = (
         await db.execute(
             select(ScriptTemplate)
@@ -94,6 +96,7 @@ async def load_reply_context(
 
 
 def parse_reply_output(raw: dict[str, Any], *, stage: str | None) -> dict[str, Any]:
+    """规范化 LLM 话术输出：主句必填，备选补齐至 2 条。"""
     primary = raw.get("primary")
     if not primary or not isinstance(primary, str):
         raise ValueError("missing primary")
@@ -101,6 +104,7 @@ def parse_reply_output(raw: dict[str, Any], *, stage: str | None) -> dict[str, A
     if not isinstance(alternatives, list):
         alternatives = []
     alternatives = [str(a) for a in alternatives if a][:2]
+    # 不足 2 条时用占位备选补齐，保证前端结构稳定
     while len(alternatives) < 2:
         alternatives.append(f"备选{len(alternatives) + 2}：可基于同上要点换个语气再发。")
     return {
@@ -119,6 +123,7 @@ async def run_reply_pipeline(
     scene: str,
     user_id: int | None,
 ) -> Suggestion | None:
+    """执行话术建议流水线；LLM 失败时回退 FakeLLM，再失败则标记 job 并推送 SSE。"""
     await job_svc.fail_stuck_jobs(db, customer_id=customer_id, task_type="reply")
     await job_svc.mark_running(db, job)
     await db.commit()
@@ -132,6 +137,7 @@ async def run_reply_pipeline(
             raw = await gateway.generate("reply", {"context": context})
             content = parse_reply_output(raw, stage=context["customer"].get("stage"))
         except Exception:  # noqa: BLE001 — LLM schema/timeout → deterministic fallback
+            # 结构/超时等问题时用确定性假数据兜底，避免前端空态
             raw = await FakeLLMProvider().generate(
                 "reply", {"context": {**context, "scene": scene}}
             )

@@ -1,3 +1,5 @@
+"""侧栏上下文：当前客户摘要与标签，供头区/能力区初始化。"""
+
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -17,6 +19,7 @@ async def sidebar_context(
     db: DbSession,
     customer_id: int | None = Query(default=None),
 ) -> dict[str, Any]:
+    """按客户 ID（或 JWT 内 customer_id）返回客户基础信息与生效标签。"""
     cid = customer_id or user.get("customer_id")
     if cid is None:
         raise AppError(ErrorCode.PARAM, "缺少 customer_id", http_status=400)
@@ -47,6 +50,7 @@ async def sidebar_context(
                 "owner_name": owner_name,
             },
             "tags": [{"id": t.id, "name": t.name} for t in tag_rows],
+            # 弱提示由 SSE 实时推送，上下文接口固定占位
             "weak_tip": None,
         }
     )

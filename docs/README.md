@@ -13,3 +13,8 @@
 | [ClassDoc/23-提升项与风险分析.md](../ClassDoc/23-提升项与风险分析.md) | 提升优先级与风险登记 |
 | [ClassDoc/24-模拟聊天框与侧边栏联调设计.md](../ClassDoc/24-模拟聊天框与侧边栏联调设计.md) | 模拟会话工作台设计 |
 | [ClassDoc/25-前端UIUX改进方案.md](../ClassDoc/25-前端UIUX改进方案.md) | 侧栏/后台体验方案 |
+| [ClassDoc/26-改进迭代阶段规划.md](../ClassDoc/26-改进迭代阶段规划.md) | 试运行前分阶段规划 |
+| [ClassDoc/27-阶段1功能开发记录.md](../ClassDoc/27-阶段1功能开发记录.md) | 阶段1：聊天工作台实现 |
+| [ClassDoc/28-阶段1测试报告.md](../ClassDoc/28-阶段1测试报告.md) | 阶段1验收 |
+| [ClassDoc/29-标签侧栏手工与UX改进记录.md](../ClassDoc/29-标签侧栏手工与UX改进记录.md) | 侧栏标签点选/自定义 |
+| [ClassDoc/30-全端UX审计与改进计划.md](../ClassDoc/30-全端UX审计与改进计划.md) | 全端审计与分阶段改进计划 |

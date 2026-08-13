@@ -1,4 +1,4 @@
-"""Profile AI pipeline: ContextLoader → Prompt → LLM → Parse → Draft → SSE."""
+"""画像 AI 流水线：加载上下文 → 构造 Prompt → LLM → 解析 → 写入草稿 → SSE 推送。"""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from app.features.ai import jobs as job_svc
 
 
 async def load_context(db: AsyncSession, customer_id: int) -> dict[str, Any]:
+    """加载画像生成所需上下文：客户基本信息、已确认画像、近窗聊天、订单与客服摘要。"""
     customer = await db.get(Customer, customer_id)
     profile = (
         await db.execute(
@@ -71,6 +72,7 @@ async def load_context(db: AsyncSession, customer_id: int) -> dict[str, Any]:
         }
         if profile
         else None,
+        # DB 按时间倒序取近窗，组装时再翻为正序，便于模型理解对话脉络
         "messages": [
             {
                 "direction": m.direction,
@@ -95,6 +97,7 @@ async def load_context(db: AsyncSession, customer_id: int) -> dict[str, Any]:
 
 
 def build_prompt(context: dict[str, Any]) -> str:
+    """根据上下文构造画像抽取 Prompt。"""
     return (
         "Extract a K12 customer 360 profile as JSON with keys "
         "basic_info, study_info, prefer_info, timeline, confidence, sources.\n"
@@ -103,6 +106,7 @@ def build_prompt(context: dict[str, Any]) -> str:
 
 
 def parse_profile_output(raw: dict[str, Any]) -> dict[str, Any]:
+    """校验并规范化 LLM 输出；缺失必填字段时抛出 ValueError。"""
     required = ("basic_info", "study_info", "prefer_info", "timeline")
     for key in required:
         if key not in raw:
@@ -132,6 +136,7 @@ async def run_profile_pipeline(
     customer_id: int,
     user_id: int | None,
 ) -> ProfileDraft | None:
+    """执行画像生成流水线：成功写草稿并推送 SSE，失败标记 job 并推送 job_failed。"""
     await job_svc.mark_running(db, job)
     await db.commit()
 
@@ -143,7 +148,7 @@ async def run_profile_pipeline(
         try:
             parsed = parse_profile_output(raw)
         except ValueError:
-            # retry once
+            # 解析失败时重试一次，强调仅返回合法 JSON
             raw = await gateway.generate(
                 "profile", {"prompt": prompt + "\nRetry: valid JSON only.", "context": context}
             )
@@ -192,7 +197,7 @@ async def run_profile_pipeline(
         return draft
     except Exception as exc:  # noqa: BLE001
         await db.rollback()
-        # re-load job in new transaction state
+        # rollback 后需重新加载 job，再写入失败状态
         job = await db.get(AiJob, job.id)
         if job:
             await job_svc.mark_failed(db, job, str(exc))

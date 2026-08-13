@@ -1,4 +1,4 @@
-"""Remind strategies: weak (SSE) / strong (WeCom, degradable)."""
+"""日程提醒策略：弱提示走 SSE，强提醒走企微（可降级）。"""
 
 from __future__ import annotations
 
@@ -19,8 +19,10 @@ async def remind_schedule(
     user: dict[str, Any],
     mode: str,
 ) -> dict[str, Any]:
+    """按 mode 分发弱/强提醒，返回投递与降级结果。"""
     owner = await db.get(AppUser, user["id"])
     pref = dict(owner.remind_pref or {}) if owner else {}
+    # 无客户时退回到用户自身通道，保证 SSE 仍可投递
     channel_id = item.customer_id or user["id"]
     tip_text = f"{item.title}" + (
         f" · {item.start_at.isoformat()}" if item.start_at else ""
@@ -42,6 +44,7 @@ async def _weak_remind(
     channel_id: int,
     tip_text: str,
 ) -> dict[str, Any]:
+    """弱提示：尊重 weak_tip 偏好，成功则向 SSE 通道推送。"""
     if pref.get("weak_tip", True) is False:
         await write_event(
             db,
@@ -95,6 +98,7 @@ async def _strong_remind(
     user: dict[str, Any],
     pref: dict[str, Any],
 ) -> dict[str, Any]:
+    """强提醒：偏好关闭或缺企微凭证则降级；当前厂商消息未接入。"""
     settings = get_settings()
     strong_enabled = pref.get("strong_notify", True)
     has_wecom = bool(
@@ -123,6 +127,7 @@ async def _strong_remind(
             "schedule_id": item.id,
         }
 
+    # 凭证齐全但强提醒通道尚未实现，仍记为降级
     await write_event(
         db,
         user_id=user["id"],

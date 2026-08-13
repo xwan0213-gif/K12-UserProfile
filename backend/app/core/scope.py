@@ -1,4 +1,4 @@
-"""apply_scope: filter queries by role data range (FR-ADMIN-02)."""
+"""数据范围（FR-ADMIN-02）：按角色过滤客户查询。"""
 
 from collections.abc import Sequence
 
@@ -10,7 +10,7 @@ from app.core.models import Customer, Org
 
 
 async def _org_subtree_ids(db: AsyncSession, root_org_id: int) -> list[int]:
-    """BFS collect org id and descendants (small tree, MVP)."""
+    """BFS 收集某组织及其全部子组织 id（MVP 组织树较小，全量加载后内存遍历）。"""
     result = await db.execute(select(Org.id, Org.parent_id).where(Org.deleted_at.is_(None)))
     rows = result.all()
     children: dict[int | None, list[int]] = {}
@@ -33,6 +33,13 @@ async def apply_scope(
     *,
     customer_alias: type = Customer,
 ) -> Select:
+    """
+    按角色给客户相关查询加范围条件。
+
+    - admin：不过滤
+    - regional：本组织及子组织下的客户
+    - advisor：仅本人负责的客户
+    """
     role = user.get("role")
     if role == "admin":
         return query
@@ -52,6 +59,7 @@ async def assert_customer_in_scope(
     user: dict,
     customer_id: int,
 ) -> Customer:
+    """校验客户存在且在当前用户数据范围内；否则 403。"""
     q = select(Customer).where(
         Customer.id == customer_id,
         Customer.deleted_at.is_(None),
@@ -65,4 +73,5 @@ async def assert_customer_in_scope(
 
 
 def org_ids_filter(org_ids: Sequence[int]):
+    """客户 org_id IN (...) 条件辅助。"""
     return or_(Customer.org_id.in_(list(org_ids)))

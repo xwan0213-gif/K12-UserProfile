@@ -1,3 +1,8 @@
+"""管理端 API 路由：组织、用户账号、客户、订单、标签、话术模板、AI 采纳率与看板。
+
+权限说明：多数写操作限 admin / regional；客户与订单查询会叠加数据范围（scope）。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -32,16 +37,20 @@ from app.features.profile.router import _serialize_confirmed, _serialize_draft
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-# ---------- Orgs ----------
+# ---------- 组织 Orgs ----------
 
 
 class OrgCreate(BaseModel):
+    """创建组织请求体。"""
+
     name: str
     parent_id: int | None = None
     code: str | None = None
 
 
 class OrgPatch(BaseModel):
+    """部分更新组织请求体。"""
+
     name: str | None = None
     parent_id: int | None = None
     code: str | None = None
@@ -49,6 +58,7 @@ class OrgPatch(BaseModel):
 
 @router.get("/orgs")
 async def list_orgs(user: CurrentUser, db: DbSession) -> dict[str, Any]:
+    """列出未删除的组织（admin / regional）。"""
     require_roles(user, "admin", "regional")
     rows = (
         await db.execute(select(Org).where(Org.deleted_at.is_(None)).order_by(Org.id))
@@ -67,6 +77,7 @@ async def list_orgs(user: CurrentUser, db: DbSession) -> dict[str, Any]:
 
 @router.post("/orgs")
 async def create_org(body: OrgCreate, user: CurrentUser, db: DbSession) -> dict[str, Any]:
+    """创建组织（仅 admin）。"""
     require_roles(user, "admin")
     org = Org(name=body.name, parent_id=body.parent_id, code=body.code)
     db.add(org)
@@ -79,6 +90,7 @@ async def create_org(body: OrgCreate, user: CurrentUser, db: DbSession) -> dict[
 async def patch_org(
     org_id: int, body: OrgPatch, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """部分更新组织字段（仅 admin）。"""
     require_roles(user, "admin")
     org = await db.get(Org, org_id)
     if org is None or org.deleted_at is not None:
@@ -95,6 +107,7 @@ async def patch_org(
 
 @router.delete("/orgs/{org_id}")
 async def delete_org(org_id: int, user: CurrentUser, db: DbSession) -> dict[str, Any]:
+    """软删除组织（写 deleted_at，仅 admin）。"""
     require_roles(user, "admin")
     org = await db.get(Org, org_id)
     if org is None or org.deleted_at is not None:
@@ -104,10 +117,12 @@ async def delete_org(org_id: int, user: CurrentUser, db: DbSession) -> dict[str,
     return ok({"deleted": True})
 
 
-# ---------- Users ----------
+# ---------- 用户 Users ----------
 
 
 class UserCreate(BaseModel):
+    """创建应用用户请求体。"""
+
     name: str
     role: str
     org_id: int | None = None
@@ -116,6 +131,8 @@ class UserCreate(BaseModel):
 
 
 class UserPatch(BaseModel):
+    """部分更新用户请求体。"""
+
     name: str | None = None
     role: str | None = None
     org_id: int | None = None
@@ -124,6 +141,8 @@ class UserPatch(BaseModel):
 
 
 class AccountCreate(BaseModel):
+    """为用户创建后台登录账号请求体。"""
+
     login_name: str
     password: str
 
@@ -138,6 +157,7 @@ async def list_users(
     page: int | None = 1,
     page_size: int | None = 20,
 ) -> dict[str, Any]:
+    """分页列出用户；支持组织/角色/关键词筛选；regional 仅看本组织。"""
     require_roles(user, "admin", "regional")
     p, ps = clamp_page(page, page_size)
     q = select(AppUser).where(AppUser.deleted_at.is_(None))
@@ -149,6 +169,7 @@ async def list_users(
         q = q.where(
             or_(AppUser.name.ilike(f"%{keyword}%"), AppUser.mobile.ilike(f"%{keyword}%"))
         )
+    # 区域主管强制限定本组织，防止越权查看
     if user["role"] == "regional" and user.get("org_id"):
         q = q.where(AppUser.org_id == user["org_id"])
 
@@ -177,6 +198,7 @@ async def list_users(
 async def create_user(
     body: UserCreate, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """创建用户；regional 不可创建 admin，org_id 缺省取当前用户组织。"""
     require_roles(user, "admin", "regional")
     if body.role not in ("admin", "regional", "advisor"):
         raise AppError(ErrorCode.PARAM, "无效角色", http_status=400)
@@ -199,6 +221,7 @@ async def create_user(
 async def patch_user(
     user_id: int, body: UserPatch, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """部分更新用户资料（admin / regional）。"""
     require_roles(user, "admin", "regional")
     row = await db.get(AppUser, user_id)
     if row is None or row.deleted_at is not None:
@@ -221,6 +244,7 @@ async def patch_user(
 async def create_account(
     user_id: int, body: AccountCreate, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """为指定用户创建后台登录账号（仅 admin，且一人一账号）。"""
     require_roles(user, "admin")
     target = await db.get(AppUser, user_id)
     if target is None or target.deleted_at is not None:
@@ -240,10 +264,12 @@ async def create_account(
     return ok({"user_id": user_id, "login_name": body.login_name})
 
 
-# ---------- Customers ----------
+# ---------- 客户 Customers ----------
 
 
 class CustomerPatch(BaseModel):
+    """部分更新客户请求体。"""
+
     parent_name: str | None = None
     student_name: str | None = None
     grade: str | None = None
@@ -255,6 +281,8 @@ class CustomerPatch(BaseModel):
 
 
 class CsSummaryBody(BaseModel):
+    """客服摘要写入请求体。"""
+
     summary_text: str
 
 
@@ -269,6 +297,7 @@ async def list_customers(
     page: int | None = 1,
     page_size: int | None = 20,
 ) -> dict[str, Any]:
+    """分页列出客户（含标签、归属顾问、画像状态）；自动应用数据范围。"""
     p, ps = clamp_page(page, page_size)
     q = select(Customer).where(Customer.deleted_at.is_(None))
     q = await apply_scope(q, user, db)
@@ -284,6 +313,7 @@ async def list_customers(
     if owner_user_id:
         q = q.where(Customer.owner_user_id == owner_user_id)
     if tag_id:
+        # 通过客户-标签关联表过滤
         q = q.where(
             Customer.id.in_(
                 select(CustomerTag.customer_id).where(CustomerTag.tag_id == tag_id)
@@ -311,9 +341,12 @@ async def list_customers(
         ).scalars().all()
         draft = (
             await db.execute(
-                select(ProfileDraft.id).where(
-                    ProfileDraft.customer_id == c.id, ProfileDraft.status == "draft"
-                ).limit(1)
+                select(ProfileDraft.id)
+                .where(
+                    ProfileDraft.customer_id == c.id,
+                    ProfileDraft.status.in_(("draft", "partial_confirmed")),
+                )
+                .limit(1)
             )
         ).scalar_one_or_none()
         confirmed = (
@@ -321,6 +354,7 @@ async def list_customers(
                 select(CustomerProfile.id).where(CustomerProfile.customer_id == c.id)
             )
         ).scalar_one_or_none()
+        # 有草稿优先显示 draft；仅有确认画像为 confirmed；否则 empty
         profile_status = "confirmed" if confirmed and not draft else (
             "draft" if draft else "empty"
         )
@@ -345,6 +379,7 @@ async def list_customers(
 async def get_customer(
     customer_id: int, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """客户详情：基本信息、画像、标签、订单、近 30 条消息、客服摘要。"""
     customer = await assert_customer_in_scope(db, user, customer_id)
     confirmed = (
         await db.execute(
@@ -354,7 +389,10 @@ async def get_customer(
     draft = (
         await db.execute(
             select(ProfileDraft)
-            .where(ProfileDraft.customer_id == customer_id, ProfileDraft.status == "draft")
+            .where(
+                ProfileDraft.customer_id == customer_id,
+                ProfileDraft.status.in_(("draft", "partial_confirmed")),
+            )
             .order_by(ProfileDraft.created_at.desc())
             .limit(1)
         )
@@ -435,6 +473,7 @@ async def get_customer(
 async def patch_customer(
     customer_id: int, body: CustomerPatch, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """部分更新客户字段（须在数据范围内）。"""
     customer = await assert_customer_in_scope(db, user, customer_id)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(customer, field, value)
@@ -446,6 +485,7 @@ async def patch_customer(
 async def put_cs_summary(
     customer_id: int, body: CsSummaryBody, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """创建或更新客户客服摘要（upsert）。"""
     await assert_customer_in_scope(db, user, customer_id)
     cs = (
         await db.execute(select(CsSummary).where(CsSummary.customer_id == customer_id))
@@ -464,10 +504,12 @@ async def put_cs_summary(
     return ok({"customer_id": customer_id})
 
 
-# ---------- Orders ----------
+# ---------- 订单 Orders ----------
 
 
 class OrderCreate(BaseModel):
+    """创建订单请求体。"""
+
     customer_id: int
     external_order_no: str | None = None
     title: str
@@ -485,13 +527,14 @@ async def list_orders(
     page: int | None = 1,
     page_size: int | None = 20,
 ) -> dict[str, Any]:
+    """分页列出订单；通过客户 scope 过滤可见范围。"""
     p, ps = clamp_page(page, page_size)
     q = (
         select(OrderRecord, Customer)
         .join(Customer, Customer.id == OrderRecord.customer_id)
         .where(Customer.deleted_at.is_(None))
     )
-    # scope via customer
+    # 先算出当前用户可见客户 id，再约束订单（空范围用 -1 避免 IN ()）
     scoped = await apply_scope(select(Customer.id).where(Customer.deleted_at.is_(None)), user, db)
     scoped_ids = (await db.execute(scoped)).scalars().all()
     q = q.where(OrderRecord.customer_id.in_(list(scoped_ids) or [-1]))
@@ -526,6 +569,7 @@ async def list_orders(
 async def create_order(
     body: OrderCreate, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """创建订单；paid 且未传 paid_at 时自动填当前时间。"""
     await assert_customer_in_scope(db, user, body.customer_id)
     row = OrderRecord(
         customer_id=body.customer_id,
@@ -542,10 +586,12 @@ async def create_order(
     return ok({"id": row.id})
 
 
-# ---------- Tags ----------
+# ---------- 标签 Tags ----------
 
 
 class TagCreate(BaseModel):
+    """创建标签定义请求体。"""
+
     name: str
     description: str | None = None
     is_measurable: bool = True
@@ -555,6 +601,8 @@ class TagCreate(BaseModel):
 
 
 class TagPatch(BaseModel):
+    """部分更新标签定义请求体。"""
+
     name: str | None = None
     description: str | None = None
     is_measurable: bool | None = None
@@ -565,6 +613,7 @@ class TagPatch(BaseModel):
 
 @router.get("/tags/stats")
 async def tag_stats(user: CurrentUser, db: DbSession) -> dict[str, Any]:
+    """各标签关联客户数统计。"""
     require_roles(user, "admin", "regional", "advisor")
     rows = (
         await db.execute(
@@ -591,6 +640,7 @@ async def tag_stats(user: CurrentUser, db: DbSession) -> dict[str, Any]:
 
 @router.get("/tags")
 async def list_tags(user: CurrentUser, db: DbSession) -> dict[str, Any]:
+    """列出标签定义，并附带各标签客户数。"""
     rows = (
         await db.execute(
             select(TagDef)
@@ -632,6 +682,7 @@ async def list_tags(user: CurrentUser, db: DbSession) -> dict[str, Any]:
 async def create_tag(
     body: TagCreate, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """创建标签定义（admin / regional）。"""
     require_roles(user, "admin", "regional")
     row = TagDef(**body.model_dump())
     db.add(row)
@@ -644,6 +695,7 @@ async def create_tag(
 async def patch_tag(
     tag_id: int, body: TagPatch, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """部分更新标签定义（admin / regional）。"""
     require_roles(user, "admin", "regional")
     row = await db.get(TagDef, tag_id)
     if row is None or row.deleted_at is not None:
@@ -654,10 +706,12 @@ async def patch_tag(
     return ok({"id": row.id})
 
 
-# ---------- Script templates ----------
+# ---------- 话术模板 Script templates ----------
 
 
 class ScriptTemplateCreate(BaseModel):
+    """创建话术模板请求体。"""
+
     scene: str
     stage: str | None = None
     title: str | None = None
@@ -666,6 +720,8 @@ class ScriptTemplateCreate(BaseModel):
 
 
 class ScriptTemplatePatch(BaseModel):
+    """部分更新话术模板请求体。"""
+
     scene: str | None = None
     stage: str | None = None
     title: str | None = None
@@ -674,6 +730,7 @@ class ScriptTemplatePatch(BaseModel):
 
 
 def _serialize_script(t: ScriptTemplate) -> dict[str, Any]:
+    """将话术模板序列化为 API 响应字典。"""
     return {
         "id": t.id,
         "scene": t.scene,
@@ -694,10 +751,12 @@ async def list_script_templates(
     stage: str | None = None,
     enabled: bool | None = None,
 ) -> dict[str, Any]:
+    """列出话术模板；可按 scene / stage / enabled 筛选。"""
     require_roles(user, "admin", "regional", "advisor")
     q = select(ScriptTemplate)
     if scene:
         q = q.where(ScriptTemplate.scene == scene)
+    # stage 空字符串表示筛选「无学段」模板
     if stage is not None:
         q = q.where(ScriptTemplate.stage == stage) if stage else q.where(
             ScriptTemplate.stage.is_(None)
@@ -714,6 +773,7 @@ async def list_script_templates(
 async def create_script_template(
     body: ScriptTemplateCreate, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """创建话术模板；scene 限 sales/cs，stage 限学段枚举。"""
     require_roles(user, "admin", "regional")
     if body.scene not in ("sales", "cs"):
         raise AppError(ErrorCode.PARAM, "scene 须为 sales/cs", http_status=400)
@@ -736,6 +796,7 @@ async def create_script_template(
 async def patch_script_template(
     template_id: int, body: ScriptTemplatePatch, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
+    """部分更新话术模板（含 scene/stage 校验）。"""
     require_roles(user, "admin", "regional")
     row = await db.get(ScriptTemplate, template_id)
     if row is None:
@@ -759,7 +820,7 @@ async def patch_script_template(
 async def disable_script_template(
     template_id: int, user: CurrentUser, db: DbSession
 ) -> dict[str, Any]:
-    """Soft disable via enabled=false."""
+    """软禁用话术模板（enabled=false，非物理删除）。"""
     require_roles(user, "admin", "regional")
     row = await db.get(ScriptTemplate, template_id)
     if row is None:
@@ -769,8 +830,9 @@ async def disable_script_template(
     return ok({"id": row.id, "enabled": False})
 
 
-# ---------- AI adoption ----------
+# ---------- AI 采纳率 AI adoption ----------
 
+# 计入采纳统计的事件动作集合
 _ADOPTION_ACTIONS = (
     "reply_copy",
     "reply_adopt",
@@ -791,6 +853,7 @@ async def ai_adoption(
     org_id: int | None = None,
     group_by: str | None = Query(default="advisor"),
 ) -> dict[str, Any]:
+    """AI 建议采纳统计：按顾问（可选按日）聚合曝光、采纳、拒绝等指标。"""
     require_roles(user, "admin", "regional")
 
     advisor_q = select(AppUser).where(
@@ -799,6 +862,7 @@ async def ai_adoption(
     if user["role"] == "regional" and user.get("org_id"):
         advisor_q = advisor_q.where(AppUser.org_id == user["org_id"])
     if org_id is not None:
+        # 按 org_id 跨组织筛选仅超管可用
         if user["role"] != "admin":
             raise AppError(ErrorCode.FORBIDDEN, "仅超管可按 org_id 筛选", http_status=403)
         advisor_q = advisor_q.where(AppUser.org_id == org_id)
@@ -817,6 +881,7 @@ async def ai_adoption(
         q = q.where(EventLog.created_at <= end)
     events = (await db.execute(q)).scalars().all()
 
+    # 曝光：建议进入 shown / adopted / rejected / edit_adopted 状态的记录
     shown_q = select(Suggestion).where(
         Suggestion.status.in_(("shown", "adopted", "rejected", "edit_adopted")),
         Suggestion.created_by_user.in_(advisor_ids),
@@ -832,6 +897,7 @@ async def ai_adoption(
     buckets: dict[tuple[Any, ...], dict[str, Any]] = {}
 
     def _ensure(user_id: int | None, day: str | None) -> dict[str, Any]:
+        """按顾问（及可选日期）取/建聚合桶。"""
         key: tuple[Any, ...] = (user_id, day) if group_by == "day" else (user_id,)
         if key not in buckets:
             adv = advisors.get(user_id) if user_id else None
@@ -871,6 +937,7 @@ async def ai_adoption(
 
     items = []
     for b in buckets.values():
+        # 采纳率 = (采纳 + 编辑采纳) / (采纳 + 编辑采纳 + 拒绝)
         denom = b["adopt"] + b["edit_adopt"] + b["reject"]
         b["adoption_rate"] = (
             round((b["adopt"] + b["edit_adopt"]) / denom, 4) if denom else 0.0
@@ -880,7 +947,7 @@ async def ai_adoption(
     return ok({"items": items, "group_by": group_by or "advisor"})
 
 
-# ---------- Dashboard ----------
+# ---------- 看板 Dashboard ----------
 
 
 @router.get("/dashboard/summary")
@@ -889,6 +956,7 @@ async def dashboard_summary(
     db: DbSession,
     org_id: int | None = None,
 ) -> dict[str, Any]:
+    """看板摘要：漏斗（线索/意向/体验/成交）、续费率占位、顾问排行。"""
     q = select(Customer).where(Customer.deleted_at.is_(None))
     q = await apply_scope(q, user, db)
     if org_id is not None and user["role"] == "admin":
@@ -897,6 +965,7 @@ async def dashboard_summary(
     customer_ids = [c.id for c in customers] or [-1]
 
     lead = len(customers)
+    # 意向：打了「高意向」或「近期决策」标签的去重客户数
     tagged_intent = (
         await db.execute(
             select(func.count(func.distinct(CustomerTag.customer_id))).where(
@@ -915,10 +984,11 @@ async def dashboard_summary(
             )
         )
     ).scalars().all()
+    # 体验课：标题含「体验」；成交：付费订单去重客户数
     trial = sum(1 for o in paid_orders if o.title and "体验" in o.title)
     deal = len({o.customer_id for o in paid_orders})
 
-    # advisor top by customer count in scope
+    # 顾问 Top5：按范围内客户数排序
     advisor_rows = (
         await db.execute(
             select(AppUser.id, AppUser.name, func.count(Customer.id))
@@ -934,7 +1004,8 @@ async def dashboard_summary(
         )
     ).all()
 
-    renewal_rate = 0.63 if deal else 0.0  # MVP placeholder rate when deals exist
+    # MVP：有成交时用固定占位续费率
+    renewal_rate = 0.63 if deal else 0.0
 
     return ok(
         {

@@ -1,3 +1,5 @@
+"""业务操作审计日志写入。"""
+
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +17,11 @@ async def write_event(
     ref_id: int | None = None,
     meta: dict[str, Any] | None = None,
 ) -> EventLog:
+    """
+    追加一条 event_log；调用方负责 commit。
+
+    action 为业务动作名（如 profile_confirm_all）；ref_* 指向关联实体。
+    """
     row = EventLog(
         user_id=user_id,
         customer_id=customer_id,

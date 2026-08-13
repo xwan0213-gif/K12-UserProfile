@@ -1,3 +1,5 @@
+"""侧栏 Server-Sent Events：推送弱提示、草稿与任务状态等。"""
+
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
@@ -12,6 +14,7 @@ async def sidebar_sse(
     user: CurrentUser,
     customer_id: int | None = Query(default=None),
 ):
+    """建立 SSE 长连接；通道为 customer_id（缺省用 JWT，再退 0）。"""
     cid = customer_id or user.get("customer_id") or 0
     return StreamingResponse(
         event_stream(int(cid)),
@@ -19,6 +22,7 @@ async def sidebar_sse(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            # 关闭反向代理缓冲，避免 SSE 被攒批
             "X-Accel-Buffering": "no",
         },
     )

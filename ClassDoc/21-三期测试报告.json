@@ -18,12 +18,12 @@
     {
       "id": "T-R-04a",
       "ok": true,
-      "detail": "{\"asr_text\": \"下周周六上午方便来试听吗\", \"message_id\": 25, \"customer_id\": 1}"
+      "detail": "{\"asr_text\": \"下周周六上午方便来试听吗\", \"message_id\": 28, \"customer_id\": 1}"
     },
     {
       "id": "T-R-05a",
       "ok": true,
-      "detail": "{\"job_id\": 35, \"status\": \"queued\"}"
+      "detail": "{\"job_id\": 42, \"status\": \"queued\"}"
     },
     {
       "id": "T-R-05",
@@ -33,17 +33,17 @@
     {
       "id": "T-R-05b",
       "ok": true,
-      "detail": "{\"job_id\": 36, \"status\": \"queued\"}"
+      "detail": "{\"job_id\": 43, \"status\": \"queued\"}"
     },
     {
       "id": "T-S-01a",
       "ok": true,
-      "detail": "{\"job_id\": 37, \"status\": \"queued\"}"
+      "detail": "{\"job_id\": 44, \"status\": \"queued\"}"
     },
     {
       "id": "T-S-01",
       "ok": true,
-      "detail": "{\"suggestion_id\": 19, \"title\": \"试听安排/回访确认\", \"time_text\": \"下周六 待定\", \"start_at\": null, \"priority\": \"high\", \"source_quote\": \"下周六上午我们过来试听，记得提醒我\", \"predictive_tip\": \"试听后建议 48h 内回访，确认意向与档期\", \"status\": \"shown\", \"created_at\": \"2026-08-12T02:40:47.899100+00:00Z\"}"
+      "detail": "{\"suggestion_id\": 23, \"title\": \"试听安排/回访确认\", \"time_text\": \"下周六 待定\", \"start_at\": null, \"priority\": \"high\", \"source_quote\": \"下周六上午我们过来试听，记得提醒我\", \"predictive_tip\": \"试听后建议 48h 内回访，确认意向与档期\", \"status\": \"shown\", \"created_at\": \"2026-08-12T06:20:21.987531+00:00Z\"}"
     },
     {
       "id": "T-S-04a",
@@ -58,7 +58,7 @@
     {
       "id": "T-S-02",
       "ok": true,
-      "detail": "{\"id\": 3, \"customer_id\": 1, \"owner_user_id\": 3, \"title\": \"试听安排/回访确认\", \"start_at\": null, \"end_at\": null, \"priority\": \"high\", \"status\": \"confirmed\", \"sync_state\": \"failed\", \"external_cal_id\": null, \"source\": \"ai\", \"suggestion_id\": 19, \"remark\": \"试听后建议 48h 内回访，确认意向与档期\", \"created_at\": \"2026-08-12T02:40:"
+      "detail": "{\"id\": 6, \"customer_id\": 1, \"owner_user_id\": 3, \"title\": \"试听安排/回访确认\", \"start_at\": null, \"end_at\": null, \"priority\": \"high\", \"status\": \"confirmed\", \"sync_state\": \"failed\", \"external_cal_id\": null, \"source\": \"ai\", \"suggestion_id\": 23, \"remark\": \"试听后建议 48h 内回访，确认意向与档期\", \"created_at\": \"2026-08-12T08:42:"
     },
     {
       "id": "T-S-02b",
@@ -68,17 +68,17 @@
     {
       "id": "T-S-02c",
       "ok": true,
-      "detail": "count=2"
+      "detail": "count=5"
     },
     {
       "id": "T-S-03a",
       "ok": true,
-      "detail": "{\"delivered\": true, \"degraded\": false, \"message\": \"弱提示已推送\", \"schedule_id\": 3}"
+      "detail": "{\"delivered\": true, \"degraded\": false, \"message\": \"弱提示已推送\", \"schedule_id\": 6}"
     },
     {
       "id": "T-S-03",
       "ok": true,
-      "detail": "{\"delivered\": false, \"degraded\": true, \"message\": \"强提醒已关闭\", \"schedule_id\": 3}"
+      "detail": "{\"delivered\": false, \"degraded\": true, \"message\": \"强提醒已关闭\", \"schedule_id\": 6}"
     },
     {
       "id": "T-R-04",

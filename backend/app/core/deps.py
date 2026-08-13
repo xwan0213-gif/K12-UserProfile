@@ -1,3 +1,5 @@
+"""FastAPI 公共依赖：数据库会话、当前登录用户。"""
+
 from typing import Annotated, Any
 
 from fastapi import Depends, Header
@@ -17,13 +19,19 @@ async def get_current_user(
     db: DbSession,
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
+    """
+    解析 Authorization: Bearer <token>，返回当前用户字典。
+
+    mock_wecom 开启时支持调试令牌 ``Bearer mock-<user_id>``，跳过 JWT。
+    正式路径校验 JWT，并要求用户未删除且 status=1。
+    """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise AppError(ErrorCode.UNAUTHORIZED, "未登录或 ticket 无效", http_status=401)
 
     token = authorization.split(" ", 1)[1].strip()
     settings = get_settings()
 
-    # Mock debug token: Bearer mock-<user_id>
+    # 本地联调：Bearer mock-<user_id>
     if settings.mock_wecom and token.startswith("mock-"):
         try:
             user_id = int(token.removeprefix("mock-"))
@@ -65,6 +73,7 @@ async def get_current_user(
         "role": user.role,
         "org_id": user.org_id,
         "auth_type": payload.get("auth_type", "jwt"),
+        # 企微侧边栏场景可能把当前客户写入 JWT
         "customer_id": payload.get("customer_id"),
     }
 

@@ -1,0 +1,117 @@
+/* 青墨管理后台 — 对齐 ClassDoc/25 + 侧栏 Token */
+:root {
+  --bg: #f3f5f8;
+  --bg-hero: #e8eef4;
+  --surface: #ffffff;
+  --ink: #1a2332;
+  --muted: #667084;
+  --line: #d8dee8;
+  --accent: #0f766e;
+  --accent-hover: #0d9488;
+  --accent-soft: #ccfbf1;
+  --ai: #4338ca;
+  --ai-soft: #eef2ff;
+  --warn: #c2410c;
+  --warn-soft: #fff7ed;
+  --danger: #b42318;
+  --danger-soft: #fef3f2;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(26, 35, 50, 0.06);
+  --font-ui: "Segoe UI", "PingFang SC", "Source Han Sans SC", "Noto Sans SC", sans-serif;
+  --font-display: "Segoe UI Semibold", "PingFang SC", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+button.ghost {
+  background: transparent;
+}
+
+button.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.muted {
+  color: var(--muted);
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+table.data th,
+table.data td {
+  border-bottom: 1px solid #eef2f6;
+  padding: 8px 6px;
+  text-align: left;
+}
+
+table.data tbody tr.clickable {
+  cursor: pointer;
+}
+
+table.data tbody tr.clickable:hover {
+  background: #f8fafc;
+}

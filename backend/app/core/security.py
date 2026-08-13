@@ -1,3 +1,5 @@
+"""密码哈希与 JWT 签发/校验。"""
+
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -11,10 +13,12 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
+    """明文密码 → bcrypt 哈希。"""
     return pwd_context.hash(password)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
+    """校验明文是否匹配哈希。"""
     return pwd_context.verify(plain, hashed)
 
 
@@ -22,6 +26,7 @@ def create_access_token(
     subject: dict[str, Any],
     expires_seconds: int | None = None,
 ) -> tuple[str, int]:
+    """签发访问令牌；返回 (token, 过期秒数)。"""
     settings = get_settings()
     expire = expires_seconds or settings.jwt_expire_seconds
     payload = {
@@ -34,6 +39,7 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
+    """解码并校验 JWT；失败抛 AppError(401)。"""
     settings = get_settings()
     try:
         return jwt.decode(

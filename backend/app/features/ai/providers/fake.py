@@ -1,7 +1,10 @@
+"""Fake LLM：本地/演示用确定性 JSON，按 payload.context 与关键词拼装结果。"""
+
 from typing import Any
 
 
 def _join_messages(context: dict[str, Any]) -> str:
+    """拼接近窗消息文本（优先 asr_text，其次 content）。"""
     parts: list[str] = []
     for m in context.get("messages") or []:
         text = m.get("asr_text") or m.get("content") or ""
@@ -11,6 +14,7 @@ def _join_messages(context: dict[str, Any]) -> str:
 
 
 def _detect_weak_subjects(blob: str) -> list[str]:
+    """从聊天文本中识别提到的学科；未命中时默认「综合」。"""
     subjects = [
         ("数学", "数学"),
         ("物理", "物理"),
@@ -23,6 +27,7 @@ def _detect_weak_subjects(blob: str) -> list[str]:
 
 
 def _last_inbound(context: dict[str, Any]) -> str:
+    """取最近一条 inbound（direction=in）文本；没有则退回拼接消息的最后一行。"""
     for m in reversed(context.get("messages") or []):
         if m.get("direction") == "in":
             text = m.get("asr_text") or m.get("content") or ""
@@ -33,9 +38,17 @@ def _last_inbound(context: dict[str, Any]) -> str:
 
 
 class FakeLLMProvider:
-    """Deterministic JSON for local/demo; derives fields from payload context."""
+    """本地/演示用确定性 JSON；从 payload.context 推导字段，不调用外部模型。"""
 
     async def generate(self, task: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """按 task 返回固定结构的假数据（profile / reply / schedule / tag_recommend）。
+
+        参数:
+            task: 任务名；未知 task 时回显 payload
+            payload: 通常含 context（customer、messages、templates 等）
+        返回:
+            与真实 Provider 约定相近的 dict，便于前端联调
+        """
         context = payload.get("context") or {}
         customer = context.get("customer") or {}
         blob = _join_messages(context)
@@ -47,6 +60,7 @@ class FakeLLMProvider:
         if task == "profile":
             weak = _detect_weak_subjects(blob)
             school = customer.get("school") or "未填写"
+            # 关键词驱动意向/目标，模拟画像抽取
             intent = "试听" if ("试听" in blob or "体验" in blob) else "咨询"
             goal = "夯实基础" if ("基础" in blob or "薄弱" in blob) else "提升成绩"
             return {
@@ -92,6 +106,7 @@ class FakeLLMProvider:
                     :40
                 ]
             scene = context.get("scene") or "sales"
+            # 客服/售后场景走另一套话术，避免销售逼单口吻
             if scene in ("cs", "service"):
                 return _fake_cs_reply(
                     parent=parent,
@@ -142,12 +157,14 @@ class FakeLLMProvider:
             remove: list[dict[str, str]] = []
 
             def _maybe_add(name: str, reason: str) -> None:
+                """仅当标签在目录中、尚未生效且未重复推荐时加入 add。"""
                 if name in catalog_names and name not in active and name not in {
                     a["tag_name"] for a in add
                 }:
                     add.append({"tag_name": name, "reason": reason})
 
             def _maybe_remove(name: str, reason: str) -> None:
+                """仅当标签当前生效且未重复时加入 remove。"""
                 if name in active and name not in {r["tag_name"] for r in remove}:
                     remove.append({"tag_name": name, "reason": reason})
 
@@ -169,7 +186,7 @@ class FakeLLMProvider:
             if "刚加微信" in active and ("试听" in blob or len(blob) > 40):
                 _maybe_remove("刚加微信", "已进入深度咨询")
             if not add and catalog_names:
-                # deterministic fallback from catalog
+                # 无命中时从目录取第一个未生效标签，保证可演示
                 for name in sorted(catalog_names):
                     if name not in active:
                         _maybe_add(name, "基于近窗上下文的默认推荐")
@@ -191,7 +208,7 @@ def _fake_cs_reply(
     tpl_hint: str,
     scene: str,
 ) -> dict[str, Any]:
-    """Service-oriented wording: 补课/投诉/续费/到课 — not sales 试听逼单."""
+    """客服向回复：补课/投诉/续费/到课等，非销售试听逼单口吻。"""
     if "投诉" in blob or "不满" in blob or "差评" in blob:
         primary = (
             f"{parent}您好，非常理解您的着急。关于{student}近期上课体验，"
@@ -245,7 +262,7 @@ def _fake_schedule(
     parent: str,
     student: str,
 ) -> dict[str, Any]:
-    """Parse time/intent phrases → schedule draft JSON + optional predictive tip."""
+    """从时间/意图短语生成日程草稿 JSON，并附可选预测提示。"""
     quote = ""
     for m in reversed(context.get("messages") or []):
         text = str(m.get("asr_text") or m.get("content") or "")
@@ -263,6 +280,7 @@ def _fake_schedule(
     priority = "medium"
     start_at = None
 
+    # 意图 → 标题与优先级
     if "试听" in blob or "体验" in blob:
         title = "试听安排/回访确认"
         priority = "high"
@@ -278,6 +296,7 @@ def _fake_schedule(
     elif "到访" in blob or "看课" in blob:
         title = "到访看课"
 
+    # 粗粒度时间文案（不解析具体 datetime）
     if "下周六" in blob:
         time_text = "下周六 待定"
     elif "周六" in blob:

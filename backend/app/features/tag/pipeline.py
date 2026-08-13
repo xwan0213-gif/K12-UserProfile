@@ -1,4 +1,4 @@
-"""Tag recommend pipeline: active tags + catalog + messages → Suggestion(type=tag)."""
+"""标签推荐 AI 流水线：当前标签 + 标签目录 + 聊天 → Suggestion(type=tag) → SSE。"""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from app.features.ai.gateway import get_gateway
 
 
 async def load_tag_context(db: AsyncSession, customer_id: int) -> dict[str, Any]:
+    """加载标签推荐上下文：客户、画像、已挂标签、启用标签目录与近窗聊天。"""
     customer = await db.get(Customer, customer_id)
     profile = (
         await db.execute(
@@ -101,12 +102,14 @@ async def load_tag_context(db: AsyncSession, customer_id: int) -> dict[str, Any]
 
 
 def parse_tag_output(raw: dict[str, Any]) -> dict[str, Any]:
+    """规范化 LLM 标签推荐输出为 {add, remove}，每项含 tag_name/reason。"""
     add_raw = raw.get("add") or []
     remove_raw = raw.get("remove") or []
     if not isinstance(add_raw, list) or not isinstance(remove_raw, list):
         raise ValueError("add/remove must be lists")
 
     def _norm(items: list[Any]) -> list[dict[str, str]]:
+        """兼容字符串或 dict 两种推荐项格式。"""
         out: list[dict[str, str]] = []
         for item in items:
             if isinstance(item, str):
@@ -130,6 +133,7 @@ async def run_tag_recommend_pipeline(
     customer_id: int,
     user_id: int | None,
 ) -> Suggestion | None:
+    """执行标签推荐流水线；空推荐或 LLM 失败时回退 FakeLLM，再失败则推送 job_failed。"""
     await job_svc.fail_stuck_jobs(
         db, customer_id=customer_id, task_type="tag_recommend"
     )
@@ -144,6 +148,7 @@ async def run_tag_recommend_pipeline(
         try:
             raw = await gateway.generate("tag_recommend", {"context": context})
             content = parse_tag_output(raw)
+            # 增删皆空视为无效输出，触发下方兜底
             if not content["add"] and not content["remove"]:
                 raise ValueError("empty recommendations")
         except Exception:  # noqa: BLE001

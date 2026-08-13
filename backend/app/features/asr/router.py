@@ -1,4 +1,4 @@
-"""ASR transcribe API — writes chat_message.asr_text; failures do not block text suggest."""
+"""侧边栏 ASR 转写 API：写入 chat_message.asr_text；失败不阻断后续文本建议。"""
 
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ router = APIRouter(prefix="/sidebar/asr", tags=["asr"])
 
 
 class TranscribeBody(BaseModel):
+    """语音转写请求体；create_message=True 时同步落一条语音聊天消息。"""
+
     customer_id: int
     audio_ref: str | None = None
     content_hint: str | None = None
@@ -34,6 +36,7 @@ async def transcribe_audio(
     user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
+    """转写音频并可选写入聊天消息；转写失败以 AppError 返回，不阻塞话术建议流程。"""
     await assert_customer_in_scope(db, user, body.customer_id)
     settings = get_settings()
 
@@ -47,6 +50,7 @@ async def transcribe_audio(
     except AppError:
         raise
     except Exception as exc:  # noqa: BLE001
+        # 统一包装为业务错误，前端可继续走文本建议
         raise AppError(
             ErrorCode.AI_FAILED,
             "转写失败，不阻断后续文本建议",

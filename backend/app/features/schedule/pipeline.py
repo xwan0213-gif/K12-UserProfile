@@ -1,4 +1,4 @@
-"""Schedule AI pipeline: context → LLM → Suggestion(type=schedule) → SSE."""
+"""日程 AI 流水线：组装上下文 → LLM → Suggestion(type=schedule) → SSE。"""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from app.features.ai.gateway import get_gateway
 
 
 async def load_schedule_context(db: AsyncSession, customer_id: int) -> dict[str, Any]:
+    """拉取客户画像、近期消息、订单与标签，供日程 LLM 使用。"""
     customer = await db.get(Customer, customer_id)
     profile = (
         await db.execute(
@@ -76,6 +77,7 @@ async def load_schedule_context(db: AsyncSession, customer_id: int) -> dict[str,
         }
         if profile
         else None,
+        # 查询按时间倒序，返回前再翻转为时间正序
         "messages": [
             {
                 "direction": m.direction,
@@ -105,6 +107,7 @@ async def load_schedule_context(db: AsyncSession, customer_id: int) -> dict[str,
 
 
 def parse_schedule_output(raw: dict[str, Any]) -> dict[str, Any]:
+    """校验并规范化 LLM 日程输出；缺 title 则抛错。"""
     title = raw.get("title")
     if not title or not isinstance(title, str):
         raise ValueError("missing title")
@@ -132,6 +135,7 @@ async def run_schedule_pipeline(
     customer_id: int,
     user_id: int | None,
 ) -> Suggestion | None:
+    """执行日程建议任务：成功写 Suggestion 并推 SSE，失败标记 job 并推 job_failed。"""
     await job_svc.fail_stuck_jobs(db, customer_id=customer_id, task_type="schedule")
     await job_svc.mark_running(db, job)
     await db.commit()
@@ -144,7 +148,7 @@ async def run_schedule_pipeline(
         try:
             raw = await gateway.generate("schedule", {"context": context})
             content = parse_schedule_output(raw)
-        except Exception:  # noqa: BLE001 — LLM schema/timeout → deterministic fallback
+        except Exception:  # noqa: BLE001 — LLM 结构/超时 → 确定性假数据回退
             raw = await FakeLLMProvider().generate(
                 "schedule", {"context": context}
             )

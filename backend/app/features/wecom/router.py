@@ -1,3 +1,5 @@
+"""认证相关路由：企微 OAuth 换票、管理端登录、当前用户。"""
+
 from typing import Any
 
 from fastapi import APIRouter
@@ -14,6 +16,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class WecomExchangeBody(BaseModel):
+    """企微 OAuth 换票请求。"""
+
     code: str = Field(..., description="企微 OAuth code 或 mock_code")
     external_userid: str | None = Field(
         default=None, description="外部联系人 ID，Mock 可传 demo_wang"
@@ -21,22 +25,29 @@ class WecomExchangeBody(BaseModel):
 
 
 class AdminLoginBody(BaseModel):
+    """管理端账号密码登录。"""
+
     login_name: str
     password: str
 
 
 @router.post("/wecom/exchange")
 async def wecom_exchange(body: WecomExchangeBody, db: DbSession) -> dict[str, Any]:
+    """
+    企微 code 换取侧栏 JWT。
+
+    非 Mock 且非 mock_code 时返回 501（真实 OAuth 未接入）。
+    """
     settings = get_settings()
     if not settings.mock_wecom and body.code != "mock_code":
-        # Real WeCom OAuth not wired in scaffold; keep adapter shell.
+        # 真实企微 OAuth 脚手架未接线，保持适配壳
         raise AppError(
             ErrorCode.INTERNAL,
             "真实企微换票尚未接入，请开启 MOCK_WECOM",
             http_status=501,
         )
 
-    # Prefer advisor with wecom_userid match, else first advisor
+    # 取一名可用顾问作为 Mock 登录身份
     result = await db.execute(
         select(AppUser).where(
             AppUser.role == "advisor",
@@ -61,6 +72,7 @@ async def wecom_exchange(body: WecomExchangeBody, db: DbSession) -> dict[str, An
             )
         )
         customer = c_result.scalar_one_or_none()
+        # demo_wang 兼容：按家长名回落到演示客户
         if customer is None and body.external_userid == "demo_wang":
             c_result = await db.execute(
                 select(Customer).where(
@@ -100,6 +112,7 @@ async def wecom_exchange(body: WecomExchangeBody, db: DbSession) -> dict[str, An
 
 @router.post("/admin/login")
 async def admin_login(body: AdminLoginBody, db: DbSession) -> dict[str, Any]:
+    """管理端登录：校验账号密码后签发 JWT。"""
     from app.core.models import AdminAccount
     from app.core.security import verify_password
 
@@ -144,4 +157,5 @@ async def admin_login(body: AdminLoginBody, db: DbSession) -> dict[str, Any]:
 
 @router.get("/me")
 async def auth_me(user: CurrentUser) -> dict[str, Any]:
+    """返回当前鉴权上下文中的用户信息。"""
     return ok(user)

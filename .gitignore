@@ -34,3 +34,18 @@ pgdata/
 # Agent skills (local Cursor/agent tooling)
 .agents/
 skills-lock.json
+
+# Backend
+backend/logs/
+backend/data/
+backend/cache/
+backend/tmp/
+backend/uploads/
+backend/static/
+backend/templates/
+backend/migrations/
+backend/tests/
+backend/scripts/
+backend/docs/
+
+.cursor/

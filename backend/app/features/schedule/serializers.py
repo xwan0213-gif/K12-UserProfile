@@ -1,4 +1,4 @@
-"""Schedule serialization / datetime helpers / calendar sync facade."""
+"""日程序列化、时间解析与日历同步门面。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from app.features.schedule.calendar import sync_to_wecom_calendar
 
 
 def serialize_item(row: ScheduleItem) -> dict[str, Any]:
+    """将 ScheduleItem 转为侧栏 API 响应字典。"""
     return {
         "id": row.id,
         "customer_id": row.customer_id,
@@ -29,6 +30,7 @@ def serialize_item(row: ScheduleItem) -> dict[str, Any]:
 
 
 def serialize_draft(row: Suggestion) -> dict[str, Any]:
+    """将 type=schedule 的 Suggestion 草稿展平为前端字段。"""
     content = row.content or {}
     return {
         "suggestion_id": row.id,
@@ -44,12 +46,14 @@ def serialize_draft(row: Suggestion) -> dict[str, Any]:
 
 
 def parse_iso_dt(value: Any) -> datetime | None:
+    """解析 ISO 时间字符串；统一去掉 tzinfo，非法值返回 None。"""
     if value is None:
         return None
     if isinstance(value, datetime):
         return value.replace(tzinfo=None) if value.tzinfo else value
     if isinstance(value, str) and value.strip():
         try:
+            # 兼容末尾 Z
             dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
             return dt.replace(tzinfo=None) if dt.tzinfo else dt
         except ValueError:
@@ -58,6 +62,7 @@ def parse_iso_dt(value: Any) -> datetime | None:
 
 
 async def apply_calendar_sync(item: ScheduleItem, sync_calendar: bool) -> None:
+    """按开关调用企微日历同步，并回写 sync_state / external_cal_id。"""
     if not sync_calendar:
         item.sync_state = "none"
         return

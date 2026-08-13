@@ -1,3 +1,5 @@
+"""侧边栏话术建议 API：触发生成、查询最新建议、记录复制/采纳等反馈。"""
+
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Query
@@ -17,6 +19,7 @@ router = APIRouter(prefix="/sidebar/reply", tags=["reply"])
 
 FeedbackAction = Literal["copy", "adopt", "reject", "edit_adopt"]
 
+# 前端反馈动作 → 建议状态
 _ACTION_STATUS = {
     "copy": "shown",
     "adopt": "adopted",
@@ -24,6 +27,7 @@ _ACTION_STATUS = {
     "edit_adopt": "edit_adopted",
 }
 
+# 前端反馈动作 → 审计事件名
 _ACTION_EVENT = {
     "copy": "reply_copy",
     "adopt": "reply_adopt",
@@ -33,22 +37,27 @@ _ACTION_EVENT = {
 
 
 class SuggestBody(BaseModel):
+    """触发生成话术建议的请求体。"""
+
     customer_id: int | None = None
     scene: str = "sales"
     force: bool = False
 
 
 def _normalize_scene(scene: str | None) -> str:
+    """规范化场景名：service/cs 统一为 cs，其余原样返回（小写）。"""
     raw = (scene or "sales").strip().lower()
     if raw in ("service", "cs"):
         return "cs"
     if raw == "sales":
         return "sales"
-    # allow unknown scenes through but keep alias mapping for service
+    # 未知场景放行，仅做 service 别名映射
     return raw
 
 
 class FeedbackBody(BaseModel):
+    """话术建议反馈请求体（复制/采纳/拒绝/编辑后采纳）。"""
+
     suggestion_id: int
     action: FeedbackAction
     edited_content: str | None = None
@@ -56,6 +65,7 @@ class FeedbackBody(BaseModel):
 
 
 def _serialize_reply(row: Suggestion) -> dict[str, Any]:
+    """将 reply 类型 Suggestion 序列化为前端结构。"""
     content = row.content or {}
     return {
         "suggestion_id": row.id,
@@ -73,6 +83,7 @@ def _serialize_reply(row: Suggestion) -> dict[str, Any]:
 async def _resolve_customer_id(
     db: DbSession, user: dict[str, Any], customer_id: int | None
 ) -> int:
+    """解析客户 ID 并校验当前用户可见范围。"""
     cid = customer_id or user.get("customer_id")
     if cid is None:
         raise AppError(ErrorCode.PARAM, "缺少 customer_id", http_status=400)
@@ -83,6 +94,7 @@ async def _resolve_customer_id(
 async def _bg_run_reply(
     job_id: int, customer_id: int, scene: str, user_id: int | None
 ) -> None:
+    """后台任务：打开独立会话执行话术建议流水线。"""
     async with SessionLocal() as db:
         job = await db.get(AiJob, job_id)
         if job is None:
@@ -99,6 +111,7 @@ async def suggest_reply(
     db: DbSession,
     background: BackgroundTasks,
 ) -> dict[str, Any]:
+    """触发 AI 话术建议；已有进行中任务且未 force 时复用既有 job。"""
     cid = await _resolve_customer_id(db, user, body.customer_id)
     scene = _normalize_scene(body.scene)
 
@@ -139,6 +152,7 @@ async def latest_reply(
     customer_id: int | None = Query(default=None),
     scene: str | None = Query(default="sales"),
 ) -> dict[str, Any]:
+    """查询最新一条未最终处理的话术建议；首次拉取时 pending → shown。"""
     cid = await _resolve_customer_id(db, user, customer_id)
     scene_norm = _normalize_scene(scene) if scene else None
     q = (
@@ -156,6 +170,7 @@ async def latest_reply(
     row = (await db.execute(q)).scalar_one_or_none()
     if row is None:
         return ok(None)
+    # 首次展示时推进状态，便于后续反馈与去重
     if row.status == "pending":
         row.status = "shown"
         await db.commit()
@@ -169,11 +184,13 @@ async def reply_feedback(
     user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
+    """记录话术建议反馈；edit_adopt 需提供编辑后内容。"""
     row = await db.get(Suggestion, body.suggestion_id)
     if row is None or row.type != "reply":
         raise AppError(ErrorCode.NOT_FOUND, "建议不存在", http_status=404)
     await assert_customer_in_scope(db, user, row.customer_id)
 
+    # 兼容 edited_content / edited_text 两种字段名
     edited = body.edited_content or body.edited_text
     if body.action == "edit_adopt" and not edited:
         raise AppError(ErrorCode.PARAM, "edit_adopt 需要 edited_content", http_status=400)
