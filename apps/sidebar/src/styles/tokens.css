@@ -73,6 +73,12 @@ button.primary:hover:not(:disabled) {
   border-color: var(--accent-hover);
 }
 
+button.is-loading {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.72;
+}
+
 button.ghost {
   background: transparent;
 }

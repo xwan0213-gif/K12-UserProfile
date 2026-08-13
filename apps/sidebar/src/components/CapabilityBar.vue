@@ -6,6 +6,7 @@ defineProps<{
     llmProvider?: string
     asr?: string
     calendar?: string
+    calendarHint?: string
   }
 }>()
 </script>
@@ -20,7 +21,13 @@ defineProps<{
       LLM {{ flags.mockLlm ? 'Fake' : (flags.llmProvider || 'cloud') }}
     </span>
     <span class="pill">ASR {{ flags.asr || 'Fake' }}</span>
-    <span class="pill warn">日历 {{ flags.calendar || '降级' }}</span>
+    <span
+      class="pill"
+      :class="flags.calendar === '可同步' ? 'on' : 'warn'"
+      :title="flags.calendarHint || ''"
+    >
+      日历 {{ flags.calendar || '降级' }}
+    </span>
   </div>
 </template>
 
@@ -48,4 +55,5 @@ defineProps<{
 }
 .pill.on { background: var(--accent-soft); color: var(--accent); }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.off { background: #e8eef4; color: var(--muted); }
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import EmptyState from '../shell/EmptyState.vue'
 
 const props = defineProps<{
   profile: any
@@ -23,12 +24,14 @@ const SECTIONS: { key: string; title: string }[] = [
   { key: 'timeline', title: '时间线' },
 ]
 
+type TimelineRow = { date: string; text: string }
+
 /** 当前正在编辑的分区 key；null 表示只读 */
 const editingKey = ref<string | null>(null)
 /** 对象类分区：可编辑的键值行 */
 const editRows = ref<{ k: string; v: string }[]>([])
-/** 数组类分区（timeline）：JSON 文本 */
-const editJson = ref('')
+/** 时间线结构化行 */
+const editTimeline = ref<TimelineRow[]>([])
 const editError = ref('')
 
 function entriesOf(obj: any): { k: string; v: string }[] {
@@ -37,13 +40,43 @@ function entriesOf(obj: any): { k: string; v: string }[] {
   if (Array.isArray(obj)) {
     return obj.map((item, i) => ({
       k: `#${i + 1}`,
-      v: typeof item === 'object' ? JSON.stringify(item) : String(item),
+      v: formatTimelineItem(item),
     }))
   }
   return Object.entries(obj).map(([k, v]) => ({
     k,
     v: v == null ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v),
   }))
+}
+
+function formatTimelineItem(item: unknown): string {
+  if (item == null) return '—'
+  if (typeof item === 'string') return item
+  if (typeof item === 'object') {
+    const o = item as Record<string, unknown>
+    const date = o.date ?? o.time ?? o.at
+    const text = o.text ?? o.event ?? o.title ?? o.desc
+    if (date || text) {
+      return [date, text].filter((x) => x != null && String(x).trim()).join(' · ')
+    }
+    return JSON.stringify(item)
+  }
+  return String(item)
+}
+
+function normalizeTimeline(raw: unknown): TimelineRow[] {
+  if (!Array.isArray(raw) || !raw.length) return [{ date: '', text: '' }]
+  return raw.map((item) => {
+    if (typeof item === 'string') return { date: '', text: item }
+    if (item && typeof item === 'object') {
+      const o = item as Record<string, unknown>
+      return {
+        date: String(o.date ?? o.time ?? o.at ?? ''),
+        text: String(o.text ?? o.event ?? o.title ?? o.desc ?? ''),
+      }
+    }
+    return { date: '', text: String(item ?? '') }
+  })
 }
 
 function hasContent(obj: any): boolean {
@@ -54,6 +87,26 @@ function fieldStatus(key: string): string {
   const st = draft.value?.field_status?.[key]
   if (typeof st === 'string' && st) return st
   return 'draft'
+}
+
+function fieldStatusLabel(key: string): string {
+  const map: Record<string, string> = {
+    draft: '待确认',
+    confirmed: '已确认',
+    pending: '待处理',
+  }
+  const st = fieldStatus(key)
+  return map[st] || st
+}
+
+function draftStatusLabel(status?: string): string {
+  const map: Record<string, string> = {
+    draft: '草稿',
+    partial_confirmed: '部分已确认',
+    merged: '已合并',
+  }
+  const s = status || 'draft'
+  return map[s] || s
 }
 
 /** 草稿里尚未确认、仍待处理的分区 */
@@ -72,8 +125,8 @@ function startEdit(key: string) {
   editError.value = ''
   const raw = draft.value?.[key]
   editingKey.value = key
-  if (key === 'timeline' || Array.isArray(raw)) {
-    editJson.value = JSON.stringify(raw ?? [], null, 2)
+  if (key === 'timeline') {
+    editTimeline.value = normalizeTimeline(raw)
     editRows.value = []
     return
   }
@@ -85,13 +138,13 @@ function startEdit(key: string) {
   if (!editRows.value.length) {
     editRows.value = [{ k: '', v: '' }]
   }
-  editJson.value = ''
+  editTimeline.value = []
 }
 
 function cancelEdit() {
   editingKey.value = null
   editRows.value = []
-  editJson.value = ''
+  editTimeline.value = []
   editError.value = ''
 }
 
@@ -101,6 +154,15 @@ function addRow() {
 
 function removeRow(idx: number) {
   editRows.value.splice(idx, 1)
+}
+
+function addTimelineRow() {
+  editTimeline.value.push({ date: '', text: '' })
+}
+
+function removeTimelineRow(idx: number) {
+  editTimeline.value.splice(idx, 1)
+  if (!editTimeline.value.length) editTimeline.value = [{ date: '', text: '' }]
 }
 
 /** 把输入字符串尽量还原成原类型（布尔/数字/JSON/纯文本） */
@@ -125,8 +187,13 @@ function coerceValue(text: string): unknown {
 }
 
 function buildValue(key: string): unknown {
-  if (key === 'timeline' || editJson.value) {
-    return JSON.parse(editJson.value)
+  if (key === 'timeline') {
+    return editTimeline.value
+      .map((r) => ({
+        date: r.date.trim() || null,
+        text: r.text.trim(),
+      }))
+      .filter((r) => r.text)
   }
   const out: Record<string, unknown> = {}
   for (const row of editRows.value) {
@@ -143,10 +210,14 @@ function saveEdit() {
   editError.value = ''
   try {
     const value = buildValue(key)
+    if (key === 'timeline' && Array.isArray(value) && !value.length) {
+      editError.value = '请至少填写一条时间线事件'
+      return
+    }
     emit('patch-field', key, value)
     cancelEdit()
   } catch (e: any) {
-    editError.value = e?.message || '内容格式不正确（时间线请使用合法 JSON）'
+    editError.value = e?.message || '内容格式不正确'
   }
 }
 
@@ -168,7 +239,13 @@ function onDiscard() {
   <section class="panel">
     <div class="title-row">
       <h2>客户画像 <em class="ai-badge">AI 建议</em></h2>
-      <button type="button" class="primary" :disabled="generating" @click="emit('generate')">
+      <button
+        type="button"
+        class="primary"
+        :class="{ 'is-loading': generating }"
+        :disabled="generating"
+        @click="emit('generate')"
+      >
         {{ generating ? '生成中…' : '生成画像' }}
       </button>
     </div>
@@ -180,20 +257,22 @@ function onDiscard() {
     <div v-if="draft">
       <p class="muted">
         置信度 {{ draft.confidence ?? '—' }} ·
-        状态 {{ draft.status || 'draft' }} ·
+        状态 {{ draftStatusLabel(draft.status) }} ·
         来源 {{ (draft.sources || []).map((s: any) => s.label || s.type).join(' / ') || '—' }}
       </p>
 
       <h3 class="sub">待确认草稿（{{ pendingSections.length }}/4）</h3>
-      <p v-if="!pendingSections.length" class="muted">
-        草稿各分区均已生效。可刷新查看下方「已生效画像」。
-      </p>
+      <EmptyState
+        v-if="!pendingSections.length"
+        title="草稿各分区均已生效。"
+        hint="可刷新查看下方「已生效画像」。"
+      />
 
       <div v-for="sec in pendingSections" :key="sec.key" class="field-card">
         <h4>
           <span>
             {{ sec.title }}
-            <em class="st">{{ fieldStatus(sec.key) }}</em>
+            <em class="st">{{ fieldStatusLabel(sec.key) }}</em>
           </span>
           <span v-if="editingKey !== sec.key" class="sec-actions">
             <button type="button" @click="startEdit(sec.key)">修改</button>
@@ -205,8 +284,13 @@ function onDiscard() {
 
         <div v-if="editingKey === sec.key" class="edit-box">
           <template v-if="sec.key === 'timeline'">
-            <p class="muted tip">按 JSON 数组编辑，例如 [{ "date": "…", "text": "…" }]</p>
-            <textarea v-model="editJson" rows="8" class="json-input" />
+            <p class="muted tip">按「日期 + 事件」编辑，无需手写 JSON。</p>
+            <div v-for="(row, idx) in editTimeline" :key="idx" class="tl-row">
+              <input v-model="row.date" placeholder="日期（可选）" class="date-input" />
+              <input v-model="row.text" placeholder="事件说明" class="v-input" />
+              <button type="button" class="ghost" @click="removeTimelineRow(idx)">删</button>
+            </div>
+            <button type="button" class="ghost" @click="addTimelineRow">+ 添加事件</button>
           </template>
           <template v-else>
             <div v-for="(row, idx) in editRows" :key="idx" class="edit-row">
@@ -245,7 +329,11 @@ function onDiscard() {
         <pre>{{ JSON.stringify(draft, null, 2) }}</pre>
       </details>
     </div>
-    <p v-else class="empty-hint">暂无 AI 草稿。可在会话后点击生成画像。</p>
+    <EmptyState
+      v-else
+      title="暂无 AI 草稿。"
+      hint="可在会话后点击「生成画像」。"
+    />
 
     <h3>已生效画像</h3>
     <div v-if="confirmedSections.length" class="field-card">
@@ -257,7 +345,7 @@ function onDiscard() {
         </div>
       </div>
     </div>
-    <p v-else class="empty-hint">尚无已生效画像</p>
+    <EmptyState v-else title="尚无已生效画像" hint="确认草稿分区后会出现在这里。" />
   </section>
 </template>
 
@@ -294,13 +382,18 @@ h3, .sub { margin: 14px 0 6px; font-size: 0.95rem; }
   gap: 8px;
   margin-top: 4px;
 }
-.edit-row {
+.edit-row, .tl-row {
   display: grid;
-  grid-template-columns: minmax(72px, 0.4fr) 1fr auto;
   gap: 6px;
   align-items: center;
 }
-.k-input, .v-input, .json-input {
+.edit-row {
+  grid-template-columns: minmax(72px, 0.4fr) 1fr auto;
+}
+.tl-row {
+  grid-template-columns: minmax(100px, 0.35fr) 1fr auto;
+}
+.k-input, .v-input, .date-input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -308,22 +401,16 @@ h3, .sub { margin: 14px 0 6px; font-size: 0.95rem; }
   background: #fff;
   color: var(--ink);
 }
-.json-input {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
-  resize: vertical;
-}
 .tip { margin: 0; font-size: 12px; }
 .err { margin: 0; color: var(--danger); font-size: 12px; }
 .adv { margin-top: 10px; }
 .adv summary { cursor: pointer; color: var(--muted); font-size: 12px; }
-pre {
-  background: #f8fafc;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px;
+.adv pre {
   font-size: 11px;
-  white-space: pre-wrap;
-  word-break: break-word;
+  overflow: auto;
+  max-height: 200px;
+  background: #f8fafc;
+  padding: 8px;
+  border-radius: 8px;
 }
 </style>

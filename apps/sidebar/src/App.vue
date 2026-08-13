@@ -9,8 +9,10 @@ import type { ReplyOutcome } from './components/suggest/SuggestPanel.vue'
 import TagsPanel from './components/tags/TagsPanel.vue'
 import SchedulePanel from './components/SchedulePanel.vue'
 import WeakTipBar from './components/WeakTipBar.vue'
+import AppToast from './components/shell/AppToast.vue'
 import { createApi } from './composables/useApi'
 import { createSseClient } from './composables/useSse'
+import { useToast } from './composables/useToast'
 
 const status = ref('idle')
 const token = ref('')
@@ -41,10 +43,18 @@ const healthFlags = ref({
   llmProvider: 'deepseek',
   asr: 'Fake',
   calendar: '降级',
+  calendarHint: '企微日历未接入',
 })
+const demoOpen = ref(false)
 
 const api = createApi(() => token.value)
+const toast = useToast()
 const generating = computed(() => !!profile.value?.generating)
+
+function notify(msg: string, kind: 'info' | 'ok' | 'warn' | 'err' = 'info') {
+  status.value = msg
+  toast.push(msg, kind)
+}
 
 const sse = createSseClient({
   getToken: () => token.value,
@@ -61,9 +71,10 @@ const sse = createSseClient({
           text: payload.text || '日程提醒',
           priority: payload.priority,
         }
-        status.value = '收到弱提醒'
+        notify('收到弱提醒', 'warn')
       } catch {
         weakTip.value = { text: data || '日程提醒' }
+        notify('收到弱提醒', 'warn')
       }
       return
     }
@@ -80,7 +91,7 @@ const sse = createSseClient({
       if (ev === 'profile_draft') tab.value = 'profile'
       await refreshAll()
       if (ev === 'schedule_draft') await schedulePanel.value?.load()
-      status.value =
+      const msg =
         ev === 'profile_draft'
           ? '收到画像草稿'
           : ev === 'reply_ready'
@@ -90,6 +101,7 @@ const sse = createSseClient({
               : ev === 'schedule_draft'
                 ? '收到日程草稿'
                 : '生成失败'
+      notify(msg, ev === 'job_failed' ? 'err' : 'ok')
     }
   },
 })
@@ -99,12 +111,20 @@ async function loadHealth() {
     const res = await fetch('/health')
     const json = await res.json()
     const d = json?.data || json
+    const calReady = d.calendar_mode === 'ready'
     healthFlags.value = {
       mockWecom: !!d.mock_wecom,
       mockLlm: !!d.mock_llm,
       llmProvider: d.llm_provider || 'deepseek',
-      asr: d.mock_llm ? 'Fake' : 'Fake/Stub',
-      calendar: '降级',
+      asr: d.asr_provider
+        ? String(d.asr_provider).toLowerCase() === 'fake'
+          ? 'Fake'
+          : String(d.asr_provider)
+        : d.mock_llm
+          ? 'Fake'
+          : 'Fake/Stub',
+      calendar: calReady ? '可同步' : '降级',
+      calendarHint: d.calendar_hint || (calReady ? '可尝试同步' : '企微日历未接入'),
     }
   } catch {
     /* ignore */
@@ -127,7 +147,7 @@ async function exchange() {
   })
   token.value = data.access_token
   if (data.customer_id) customerId.value = data.customer_id
-  status.value = `已登录：${data.user.name}`
+  notify(`已登录：${data.user.name}`, 'ok')
   await loadCustomers()
   if (!customerId.value && customers.value.length) {
     customerId.value = customers.value[0].id
@@ -141,7 +161,7 @@ async function switchCustomer() {
   const selected = customers.value.find((c) => c.id === customerId.value)
   if (selected?.external_id) externalUserId.value = selected.external_id
   replyOutcome.value = null
-  status.value = `已切换客户 #${customerId.value}`
+  notify(`已切换客户 #${customerId.value}`, 'info')
   await refreshAll()
   await chatPanel.value?.load()
   sse.connect()
@@ -191,7 +211,10 @@ async function suggestReply() {
       await new Promise((r) => setTimeout(r, 800))
     }
     if (reply.value?.based_on_asr) lastAsr.value = reply.value.based_on_asr
-    status.value = reply.value?.primary ? '已生成话术建议' : '话术生成中，请稍后查看'
+    notify(
+      reply.value?.primary ? '已生成话术建议' : '话术生成中，请稍后查看',
+      reply.value?.primary ? 'ok' : 'info',
+    )
   } finally {
     replyBusy.value = false
   }
@@ -230,7 +253,7 @@ async function replyFeedback(
       text: payloadText,
       suggestionId,
     }
-    status.value = '已复制（请到企微手动发送，系统不代发）'
+    notify('已复制（请到企微手动发送，系统不代发）', 'ok')
     // copy 后 status 仍为 shown，保留当前建议
     return
   }
@@ -246,12 +269,14 @@ async function replyFeedback(
     text: action === 'reject' ? payloadText || undefined : payloadText,
     suggestionId,
   }
-  status.value =
+  notify(
     action === 'reject'
       ? '已标记不适用（不会代发）'
       : action === 'edit_adopt'
         ? '已按编辑稿标记有用（不会代发）'
-        : '已标记有用（不会代发）'
+        : '已标记有用（不会代发）',
+    action === 'reject' ? 'warn' : 'ok',
+  )
 
   reply.value = await api(
     `/sidebar/reply/latest?customer_id=${customerId.value}&scene=${replyScene.value}`,
@@ -279,8 +304,9 @@ async function recommendTags() {
     status.value = tags.value?.recommendations
       ? '已收到标签推荐'
       : '标签推荐生成中，请稍后刷新'
+    notify(status.value, tags.value?.recommendations ? 'ok' : 'info')
   } catch (e: any) {
-    status.value = e?.message || '标签推荐失败'
+    notify(e?.message || '标签推荐失败', 'err')
   } finally {
     tagRecommendBusy.value = false
   }
@@ -315,7 +341,7 @@ async function seedPhysicsScenario() {
   await loadCustomers()
   customerId.value = data.customer_id
   externalUserId.value = data.external_id || 'demo_physics'
-  status.value = `场景就绪：客户 #${data.customer_id}`
+  notify(`场景就绪：客户 #${data.customer_id}`, 'ok')
   await refreshAll()
   await chatPanel.value?.load()
   sse.connect()
@@ -358,14 +384,17 @@ async function confirm(mode: 'all' | 'discard') {
     })
     await refreshAll()
     if (mode === 'discard') {
-      status.value = hadConfirmed
-        ? '已丢弃剩余草稿；已生效画像已保留'
-        : '已丢弃草稿；正式画像未变更'
+      notify(
+        hadConfirmed
+          ? '已丢弃剩余草稿；已生效画像已保留'
+          : '已丢弃草稿；正式画像未变更',
+        'warn',
+      )
     } else {
-      status.value = '已全部确认并写入正式画像'
+      notify('已全部确认并写入正式画像', 'ok')
     }
   } catch (e: any) {
-    status.value = String(e?.message || e || '操作失败')
+    notify(String(e?.message || e || '操作失败'), 'err')
   }
 }
 
@@ -388,12 +417,12 @@ async function confirmField(field: string) {
     })
     await refreshAll()
     if (data?.draft_status === 'merged') {
-      status.value = '四个分区均已确认并生效，草稿已合并'
+      notify('四个分区均已确认并生效，草稿已合并', 'ok')
     } else {
-      status.value = `「${titles[field] || field}」已写入正式画像，其余分区仍待确认`
+      notify(`「${titles[field] || field}」已写入正式画像，其余分区仍待确认`, 'ok')
     }
   } catch (e: any) {
-    status.value = String(e?.message || e || '确认分区失败')
+    notify(String(e?.message || e || '确认分区失败'), 'err')
   }
 }
 
@@ -409,9 +438,9 @@ async function patchField(field: string, value: unknown) {
       }),
     })
     await refreshAll()
-    status.value = '已保存草稿修改'
+    notify('已保存草稿修改', 'ok')
   } catch (e: any) {
-    status.value = String(e?.message || e || '保存草稿失败')
+    notify(String(e?.message || e || '保存草稿失败'), 'err')
   }
 }
 
@@ -421,10 +450,30 @@ async function suggestSchedule() {
   await schedulePanel.value?.suggest()
 }
 
+function openWeakTipSchedule() {
+  tab.value = 'schedule'
+  weakTip.value = null
+  notify('已打开日程', 'info')
+  void schedulePanel.value?.load()
+}
+
+function onPanelStatus(msg: string) {
+  const lower = msg.toLowerCase()
+  const kind =
+    /失败|错误|不可|拒绝/.test(msg) || lower.includes('fail')
+      ? 'err'
+      : /降级|跳过|不适用|忽略|丢弃/.test(msg)
+        ? 'warn'
+        : /已|成功|就绪|复制/.test(msg)
+          ? 'ok'
+          : 'info'
+  notify(msg, kind)
+}
+
 onMounted(() => {
   void loadHealth()
   void exchange().catch((e) => {
-    status.value = String(e.message || e)
+    notify(String(e.message || e), 'err')
   })
 })
 
@@ -436,6 +485,7 @@ onUnmounted(() => {
 <template>
   <main class="page">
     <CapabilityBar :flags="healthFlags" />
+    <AppToast />
 
     <header class="top">
       <div>
@@ -446,8 +496,6 @@ onUnmounted(() => {
         <button type="button" class="chat-toggle" @click="showChat = !showChat">
           {{ showChat ? '隐藏会话' : '会话' }}
         </button>
-        <button type="button" @click="seedPhysicsScenario">物理场景</button>
-        <button type="button" @click="exchange">重新换票</button>
       </div>
     </header>
 
@@ -460,14 +508,23 @@ onUnmounted(() => {
           </option>
         </select>
       </label>
-      <span class="muted">SSE：{{ sseLog || '等待连接…' }}</span>
     </div>
+
+    <details class="demo-mode" :open="demoOpen" @toggle="demoOpen = ($event.target as HTMLDetailsElement).open">
+      <summary>演示模式</summary>
+      <div class="demo-body">
+        <button type="button" @click="seedPhysicsScenario">物理场景</button>
+        <button type="button" @click="exchange">重新换票</button>
+        <span class="muted">SSE：{{ sseLog || '等待连接…' }}</span>
+      </div>
+    </details>
 
     <WeakTipBar
       v-if="weakTip"
       :text="weakTip.text"
       :priority="weakTip.priority"
       @dismiss="weakTip = null"
+      @open="openWeakTipSchedule"
     />
 
     <div class="bench" :class="{ 'chat-hidden': !showChat }">
@@ -476,7 +533,7 @@ onUnmounted(() => {
           ref="chatPanel"
           :api="api"
           :customer-id="customerId"
-          @status="(msg) => (status = msg)"
+          @status="onPanelStatus"
           @refreshed="refreshAll"
           @goto-tab="(t) => (tab = t)"
           @use-reply="suggestReply"
@@ -511,7 +568,7 @@ onUnmounted(() => {
             :tags="tags"
             :recommend-busy="tagRecommendBusy"
             @recommend="recommendTags"
-            @status="(msg) => (status = msg)"
+            @status="onPanelStatus"
             @refreshed="refreshTags"
           />
           <SuggestPanel
@@ -525,14 +582,14 @@ onUnmounted(() => {
             @suggest="suggestReply"
             @feedback="replyFeedback"
             @clear-outcome="clearReplyOutcome"
-            @status="(msg) => (status = msg)"
+            @status="onPanelStatus"
           />
           <SchedulePanel
             v-show="tab === 'schedule'"
             ref="schedulePanel"
             :api="api"
             :customer-id="customerId"
-            @status="(msg) => (status = msg)"
+            @status="onPanelStatus"
           />
         </div>
       </section>
@@ -598,6 +655,26 @@ h1 {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
+}
+.demo-mode {
+  margin: 0 0 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: #fafbfc;
+  padding: 6px 10px;
+}
+.demo-mode summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  user-select: none;
+}
+.demo-body {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 0 4px;
 }
 
 @media (max-width: 900px) {

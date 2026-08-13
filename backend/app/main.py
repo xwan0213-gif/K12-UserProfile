@@ -56,13 +56,27 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        """健康检查，附带 mock/LLM 开关便于联调确认环境。"""
+        """健康检查，附带 mock/LLM/ASR/日历能力态便于侧栏能力条对齐。"""
+        settings = get_settings()
+        calendar_ready = bool(
+            not settings.mock_wecom
+            and settings.wecom_corp_id
+            and settings.wecom_secret
+        )
+        asr = (settings.asr_provider or "fake").strip().lower()
         return ok(
             {
                 "service": settings.app_name,
                 "mock_wecom": settings.mock_wecom,
                 "mock_llm": settings.mock_llm,
                 "llm_provider": settings.llm_provider,
+                "asr_provider": asr,
+                "calendar_mode": "ready" if calendar_ready else "degraded",
+                "calendar_hint": (
+                    "可尝试同步企微日历"
+                    if calendar_ready
+                    else "企微日历未接入（Mock 或缺 corp/secret），同步将降级"
+                ),
             }
         )
 

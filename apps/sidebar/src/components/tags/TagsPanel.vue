@@ -44,6 +44,28 @@ const confirmBusy = ref(false)
 
 const activeIds = computed(() => new Set(active.value.map((t: any) => t.id as number)))
 
+/** 词表 + 已挂标签名，用于判断推荐是否可直接确认 */
+const knownTagNames = computed(() => {
+  const names = new Set<string>()
+  for (const t of catalog.value) {
+    if (t.name) names.add(t.name)
+  }
+  for (const t of active.value) {
+    if (t?.name) names.add(t.name)
+  }
+  return names
+})
+
+function isUnknownAddName(name?: string | null) {
+  const n = (name || '').trim()
+  if (!n) return false
+  return !knownTagNames.value.has(n)
+}
+
+const unknownSelectedAdds = computed(() =>
+  [...selectedAddNames.value].filter((n) => isUnknownAddName(n)),
+)
+
 const filteredCatalog = computed(() => {
   const q = search.value.trim().toLowerCase()
   return catalog.value.filter((t) => {
@@ -58,7 +80,7 @@ const filteredCatalog = computed(() => {
 
 watch(
   recommendations,
-  (rec) => {
+  async (rec) => {
     if (!rec) {
       selectedAddNames.value = new Set()
       selectedRemoveNames.value = new Set()
@@ -70,6 +92,7 @@ watch(
     selectedRemoveNames.value = new Set(
       (rec.remove || []).map((a: any) => a.tag_name || a.name).filter(Boolean),
     )
+    if (!catalogLoaded.value) await loadCatalog()
   },
   { immediate: true },
 )
@@ -209,6 +232,15 @@ async function confirmSelected() {
     const add_tag_ids = addNames
       .map((n) => nameToId.get(n))
       .filter((id): id is number => typeof id === 'number')
+    const skipped = addNames.filter((n) => !nameToId.has(n))
+
+    if (!add_tag_ids.length && !removeNames.length && skipped.length) {
+      emit(
+        'status',
+        `所选添加项均不在词表（${skipped.join('、')}）。请先「新建」词条，或取消勾选后忽略。`,
+      )
+      return
+    }
 
     await props.api('/sidebar/tags/recommend/confirm', {
       method: 'POST',
@@ -220,7 +252,12 @@ async function confirmSelected() {
         remove_tag_names: removeNames.length ? removeNames : [],
       }),
     })
-    emit('status', '已确认所选标签推荐')
+    emit(
+      'status',
+      skipped.length
+        ? `已确认可写入项；已跳过不在词表：${skipped.join('、')}（可先新建）`
+        : '已确认所选标签推荐',
+    )
     emit('refreshed')
   } catch (e: any) {
     emit('status', e?.message || '确认失败')
@@ -386,8 +423,18 @@ watch(
             @change="toggleAddName(a.tag_name || a.name)"
           />
           <span class="chip">+ {{ a.tag_name || a.name }}</span>
+          <span
+            v-if="isUnknownAddName(a.tag_name || a.name)"
+            class="warn-chip"
+            title="确认时会跳过；可先点「新建」写入词表"
+          >
+            不在词表 · 需先新建或跳过
+          </span>
           <span class="muted">{{ a.reason }}</span>
         </label>
+        <p v-if="unknownSelectedAdds.length" class="warn-note">
+          已勾选但不在词表：{{ unknownSelectedAdds.join('、') }}。确认时将跳过这些项；可先「新建」再确认。
+        </p>
       </div>
       <div v-if="(recommendations.remove || []).length" class="block">
         <strong>建议移除</strong>
@@ -511,6 +558,20 @@ h3 { margin: 14px 0 6px; font-size: 0.95rem; }
   flex-wrap: wrap;
   margin: 6px 0;
   cursor: pointer;
+}
+.warn-chip {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  white-space: nowrap;
+}
+.warn-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--warn);
+  line-height: 1.4;
 }
 .block { margin: 8px 0; }
 button.ghost {
