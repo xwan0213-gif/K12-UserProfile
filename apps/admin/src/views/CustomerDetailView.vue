@@ -3,14 +3,32 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '../components/EmptyState.vue'
 import { useAuth } from '../composables/useAuth'
+import { canWriteCustomers } from '../nav'
 
 const route = useRoute()
 const router = useRouter()
-const { api } = useAuth()
+const { api, role } = useAuth()
 
 const detail = ref<any>(null)
+const users = ref<any[]>([])
+const orgs = ref<any[]>([])
 const error = ref('')
+const flash = ref('')
 const loading = ref(true)
+const editing = ref(false)
+const writable = computed(() => canWriteCustomers(role.value))
+
+const editForm = ref({
+  parent_name: '',
+  student_name: '',
+  grade: '',
+  school: '',
+  stage: '',
+  owner_user_id: '' as string | number | '',
+  org_id: '' as string | number | '',
+  remark: '',
+})
+const csText = ref('')
 
 const customerId = computed(() => Number(route.params.id))
 
@@ -68,12 +86,46 @@ const messages = computed(() => {
   return [...list].reverse()
 })
 
+function syncEditForm() {
+  const c = detail.value?.customer
+  if (!c) return
+  editForm.value = {
+    parent_name: c.parent_name || '',
+    student_name: c.student_name || '',
+    grade: c.grade || '',
+    school: c.school || '',
+    stage: c.stage || '',
+    owner_user_id: c.owner_user_id ?? '',
+    org_id: c.org_id ?? '',
+    remark: c.remark || '',
+  }
+  csText.value = detail.value?.cs_summary?.summary_text || ''
+}
+
+async function loadMeta() {
+  if (role.value === 'advisor') return
+  try {
+    const [u, o] = await Promise.all([
+      api('/admin/users?page=1&page_size=100&role=advisor'),
+      role.value === 'admin' || role.value === 'regional'
+        ? api('/admin/orgs')
+        : Promise.resolve({ items: [] }),
+    ])
+    users.value = u?.items || []
+    orgs.value = o?.items || []
+  } catch {
+    users.value = []
+    orgs.value = []
+  }
+}
+
 async function load() {
   if (!customerId.value) return
   loading.value = true
   error.value = ''
   try {
     detail.value = await api(`/admin/customers/${customerId.value}`)
+    syncEditForm()
   } catch (e: any) {
     error.value = e?.message || '加载失败'
     detail.value = null
@@ -82,12 +134,62 @@ async function load() {
   }
 }
 
+async function saveCustomer() {
+  try {
+    await api(`/admin/customers/${customerId.value}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        parent_name: editForm.value.parent_name.trim(),
+        student_name: editForm.value.student_name.trim() || null,
+        grade: editForm.value.grade.trim() || null,
+        school: editForm.value.school.trim() || null,
+        stage: editForm.value.stage || null,
+        owner_user_id:
+          editForm.value.owner_user_id === ''
+            ? null
+            : Number(editForm.value.owner_user_id),
+        org_id: editForm.value.org_id === '' ? null : Number(editForm.value.org_id),
+        remark: editForm.value.remark.trim() || null,
+      }),
+    })
+    flash.value = '客户资料已保存'
+    editing.value = false
+    await load()
+  } catch (e: any) {
+    flash.value = e?.message || '保存失败'
+  }
+}
+
+async function saveCsSummary() {
+  try {
+    await api(`/admin/customers/${customerId.value}/cs-summary`, {
+      method: 'PUT',
+      body: JSON.stringify({ summary_text: csText.value }),
+    })
+    flash.value = '客服摘要已保存'
+    await load()
+  } catch (e: any) {
+    flash.value = e?.message || '摘要保存失败'
+  }
+}
+
+async function removeCustomer() {
+  if (!window.confirm('确认软删除该客户？删除后列表将不再显示。')) return
+  try {
+    await api(`/admin/customers/${customerId.value}`, { method: 'DELETE' })
+    void router.push({ name: 'customers' })
+  } catch (e: any) {
+    flash.value = e?.message || '删除失败'
+  }
+}
+
 watch(customerId, () => {
   void load()
 })
 
-onMounted(() => {
-  void load()
+onMounted(async () => {
+  await loadMeta()
+  await load()
 })
 </script>
 
@@ -114,8 +216,48 @@ onMounted(() => {
             · {{ detail.customer.school || '学校未知' }}
             · 负责人 {{ detail.customer.owner_name || '—' }}
           </p>
+          <p v-if="flash" class="muted">{{ flash }}</p>
+        </div>
+        <div v-if="writable" class="hero-actions">
+          <button type="button" @click="editing = !editing">
+            {{ editing ? '取消编辑' : '编辑资料' }}
+          </button>
+          <button type="button" @click="removeCustomer">删除客户</button>
         </div>
       </header>
+
+      <form v-if="editing && writable" class="card form" @submit.prevent="saveCustomer">
+        <strong>编辑客户资料</strong>
+        <label>家长 <input v-model="editForm.parent_name" required /></label>
+        <label>学员 <input v-model="editForm.student_name" /></label>
+        <label>年级 <input v-model="editForm.grade" /></label>
+        <label>学校 <input v-model="editForm.school" /></label>
+        <label>
+          学段
+          <select v-model="editForm.stage">
+            <option value="">—</option>
+            <option value="primary">小学</option>
+            <option value="junior">初中</option>
+            <option value="senior">高中</option>
+          </select>
+        </label>
+        <label v-if="role !== 'advisor'">
+          负责人
+          <select v-model="editForm.owner_user_id">
+            <option value="">—</option>
+            <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
+          </select>
+        </label>
+        <label v-if="role === 'admin'">
+          组织
+          <select v-model="editForm.org_id">
+            <option value="">—</option>
+            <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
+          </select>
+        </label>
+        <label>备注 <textarea v-model="editForm.remark" rows="2" /></label>
+        <button type="submit" class="primary">保存资料</button>
+      </form>
 
       <div class="split">
         <aside class="col card">
@@ -149,7 +291,11 @@ onMounted(() => {
           <h3>沟通与经营</h3>
 
           <p class="sec-label">客服摘要</p>
-          <p v-if="detail.cs_summary?.summary_text" class="summary">
+          <template v-if="writable">
+            <textarea v-model="csText" rows="4" class="cs" placeholder="填写售后/跟进摘要…" />
+            <button type="button" class="primary cs-btn" @click="saveCsSummary">保存摘要</button>
+          </template>
+          <p v-else-if="detail.cs_summary?.summary_text" class="summary">
             {{ detail.cs_summary.summary_text }}
           </p>
           <EmptyState v-else title="暂无客服摘要" />
@@ -160,7 +306,7 @@ onMounted(() => {
               {{ t.name }}
             </span>
           </div>
-          <EmptyState v-else title="暂无标签" />
+          <EmptyState v-else title="暂无标签" hint="标签挂载请在侧栏操作。" />
 
           <p class="sec-label">订单</p>
           <table v-if="(detail.orders || []).length" class="data">
@@ -176,7 +322,7 @@ onMounted(() => {
               </tr>
             </tbody>
           </table>
-          <EmptyState v-else title="暂无订单" />
+          <EmptyState v-else title="暂无订单" hint="可在「订单」页新建。" />
 
           <p class="sec-label">沟通时间线（近 30 条）</p>
           <ul v-if="messages.length" class="timeline">
@@ -199,8 +345,40 @@ onMounted(() => {
 
 <style scoped>
 .back { margin-bottom: 10px; }
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
 .hero h2 { margin: 0; font-size: 1.2rem; font-family: var(--font-display); }
 .meta { margin: 6px 0 0; }
+.hero-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  max-width: 560px;
+}
+.form label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.form input,
+.form select,
+.form textarea,
+.cs {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: var(--ink);
+  width: 100%;
+  font: inherit;
+}
+.cs-btn { margin-top: 6px; }
 .split {
   display: grid;
   grid-template-columns: minmax(260px, 0.9fr) minmax(300px, 1.1fr);
@@ -262,9 +440,9 @@ onMounted(() => {
   font-size: 11px;
   color: var(--muted);
 }
-.timeline.out .dir,
 .timeline li.out .dir { color: var(--accent); }
 .timeline .time { font-size: 11px; color: var(--muted); }
+.muted { color: var(--muted); }
 @media (max-width: 800px) {
   .split { grid-template-columns: 1fr; }
 }

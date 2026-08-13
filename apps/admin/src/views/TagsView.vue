@@ -94,6 +94,18 @@ async function saveEdit() {
   }
 }
 
+async function removeTag(id: number) {
+  if (!window.confirm('软删除该标签？词表中将不再显示。')) return
+  try {
+    await api(`/admin/tags/${id}`, { method: 'DELETE' })
+    flash.value = '标签已删除'
+    editingId.value = null
+    await load()
+  } catch (e: any) {
+    flash.value = e?.message || '删除失败'
+  }
+}
+
 onMounted(() => {
   void load()
 })
@@ -148,7 +160,10 @@ onMounted(() => {
                 <button type="button" class="primary" @click="saveEdit">保存</button>
                 <button type="button" @click="editingId = null">取消</button>
               </template>
-              <button v-else-if="writable" type="button" @click="startEdit(t)">改</button>
+              <template v-else-if="writable">
+                <button type="button" @click="startEdit(t)">改</button>
+                <button type="button" @click="removeTag(t.id)">删</button>
+              </template>
             </td>
           </tr>
         </tbody>

@@ -261,7 +261,43 @@ async def create_account(
     return ok({"user_id": user_id, "login_name": body.login_name})
 
 
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    """软删除员工（写 deleted_at，并停用）。"""
+    require_roles(user, "admin", "regional")
+    row = await db.get(AppUser, user_id)
+    if row is None or row.deleted_at is not None:
+        raise AppError(ErrorCode.NOT_FOUND, "用户不存在", http_status=404)
+    if user["role"] == "regional":
+        if row.role == "admin":
+            raise AppError(ErrorCode.FORBIDDEN, "不能删除超管", http_status=403)
+        if user.get("org_id") and row.org_id != user["org_id"]:
+            raise AppError(ErrorCode.FORBIDDEN, "不能删除其他组织员工", http_status=403)
+    if row.id == user["id"]:
+        raise AppError(ErrorCode.PARAM, "不能删除当前登录账号", http_status=400)
+    row.deleted_at = utcnow_naive()
+    row.status = 0
+    await db.commit()
+    return ok({"deleted": True, "id": user_id})
+
+
 # ---------- 客户 Customers ----------
+
+
+class CustomerCreate(BaseModel):
+    """创建客户请求体。"""
+
+    parent_name: str
+    student_name: str | None = None
+    grade: str | None = None
+    school: str | None = None
+    stage: str | None = None
+    owner_user_id: int | None = None
+    org_id: int | None = None
+    remark: str | None = None
+    external_id: str | None = None
 
 
 class CustomerPatch(BaseModel):
@@ -370,6 +406,55 @@ async def list_customers(
             }
         )
     return ok({"items": items, **page_meta(p, ps, total)})
+
+
+@router.post("/customers")
+async def create_customer(
+    body: CustomerCreate, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    """创建客户；缺省负责人/组织取当前用户；顾问强制归属自己。"""
+    owner_id = body.owner_user_id or user["id"]
+    org_id = body.org_id if body.org_id is not None else user.get("org_id")
+    if user["role"] == "advisor":
+        owner_id = user["id"]
+        org_id = user.get("org_id")
+    elif user["role"] == "regional" and user.get("org_id"):
+        # 区域主管只能建在本组织
+        org_id = user["org_id"]
+        if body.owner_user_id:
+            owner = await db.get(AppUser, body.owner_user_id)
+            if owner is None or owner.org_id != user["org_id"]:
+                raise AppError(
+                    ErrorCode.FORBIDDEN, "只能指定本组织顾问", http_status=403
+                )
+
+    if body.external_id:
+        dup = (
+            await db.execute(
+                select(Customer).where(
+                    Customer.external_id == body.external_id,
+                    Customer.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if dup:
+            raise AppError(ErrorCode.CONFLICT, "external_id 已存在", http_status=409)
+
+    row = Customer(
+        parent_name=body.parent_name,
+        student_name=body.student_name,
+        grade=body.grade,
+        school=body.school,
+        stage=body.stage,
+        owner_user_id=owner_id,
+        org_id=org_id,
+        remark=body.remark,
+        external_id=body.external_id,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return ok({"id": row.id})
 
 
 @router.get("/customers/{customer_id}")
@@ -501,6 +586,17 @@ async def put_cs_summary(
     return ok({"customer_id": customer_id})
 
 
+@router.delete("/customers/{customer_id}")
+async def delete_customer(
+    customer_id: int, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    """软删除客户（写 deleted_at）。"""
+    customer = await assert_customer_in_scope(db, user, customer_id)
+    customer.deleted_at = utcnow_naive()
+    await db.commit()
+    return ok({"deleted": True, "id": customer_id})
+
+
 # ---------- 订单 Orders ----------
 
 
@@ -512,6 +608,16 @@ class OrderCreate(BaseModel):
     title: str
     amount: float = 0
     status: str = "paid"
+    paid_at: datetime | None = None
+
+
+class OrderPatch(BaseModel):
+    """部分更新订单请求体。"""
+
+    external_order_no: str | None = None
+    title: str | None = None
+    amount: float | None = None
+    status: str | None = None
     paid_at: datetime | None = None
 
 
@@ -581,6 +687,48 @@ async def create_order(
     await db.commit()
     await db.refresh(row)
     return ok({"id": row.id})
+
+
+@router.patch("/orders/{order_id}")
+async def patch_order(
+    order_id: int, body: OrderPatch, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    """部分更新订单；须在客户数据范围内。"""
+    row = await db.get(OrderRecord, order_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "订单不存在", http_status=404)
+    await assert_customer_in_scope(db, user, row.customer_id)
+    data = body.model_dump(exclude_unset=True)
+    if "status" in data and data["status"] not in (
+        "paid",
+        "unpaid",
+        "refunded",
+        "cancelled",
+    ):
+        raise AppError(ErrorCode.PARAM, "无效订单状态", http_status=400)
+    if "paid_at" in data and data["paid_at"] is not None:
+        paid = data["paid_at"]
+        data["paid_at"] = paid.replace(tzinfo=None) if paid.tzinfo else paid
+    if data.get("status") == "paid" and "paid_at" not in data and row.paid_at is None:
+        data["paid_at"] = utcnow_naive()
+    for k, v in data.items():
+        setattr(row, k, v)
+    await db.commit()
+    return ok({"id": row.id})
+
+
+@router.delete("/orders/{order_id}")
+async def delete_order(
+    order_id: int, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    """删除订单记录（物理删除；演示/纠错用）。"""
+    row = await db.get(OrderRecord, order_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "订单不存在", http_status=404)
+    await assert_customer_in_scope(db, user, row.customer_id)
+    await db.delete(row)
+    await db.commit()
+    return ok({"deleted": True, "id": order_id})
 
 
 # ---------- 标签 Tags ----------
@@ -701,6 +849,21 @@ async def patch_tag(
         setattr(row, k, v)
     await db.commit()
     return ok({"id": row.id})
+
+
+@router.delete("/tags/{tag_id}")
+async def delete_tag(
+    tag_id: int, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    """软删除标签定义（写 deleted_at）。"""
+    require_roles(user, "admin", "regional")
+    row = await db.get(TagDef, tag_id)
+    if row is None or row.deleted_at is not None:
+        raise AppError(ErrorCode.NOT_FOUND, "标签不存在", http_status=404)
+    row.deleted_at = utcnow_naive()
+    row.enabled = False
+    await db.commit()
+    return ok({"deleted": True, "id": tag_id})
 
 
 # ---------- 话术模板 Script templates ----------

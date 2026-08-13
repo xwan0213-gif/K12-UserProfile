@@ -42,3 +42,11 @@ export function canWriteUsers(role: string) {
 export function canCreateAccount(role: string) {
   return role === 'admin'
 }
+
+export function canWriteCustomers(_role: string) {
+  return true
+}
+
+export function canWriteOrders(_role: string) {
+  return true
+}

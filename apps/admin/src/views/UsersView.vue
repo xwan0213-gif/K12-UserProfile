@@ -155,6 +155,18 @@ async function createAccount() {
   }
 }
 
+async function removeUser(id: number) {
+  if (!window.confirm('软删除该员工？删除后将无法登录且不在列表显示。')) return
+  try {
+    await api(`/admin/users/${id}`, { method: 'DELETE' })
+    flash.value = '员工已删除'
+    editingId.value = null
+    await load()
+  } catch (e: any) {
+    flash.value = e?.message || '删除失败'
+  }
+}
+
 function onSearch() {
   page.value = 1
   void load()
@@ -256,6 +268,7 @@ onMounted(async () => {
               <template v-else>
                 <button v-if="writable" type="button" @click="startEdit(u)">改</button>
                 <button v-if="canAccount" type="button" @click="openAccount(u.id)">开账号</button>
+                <button v-if="writable" type="button" @click="removeUser(u.id)">删</button>
               </template>
             </td>
           </tr>
