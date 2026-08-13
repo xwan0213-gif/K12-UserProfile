@@ -18,3 +18,8 @@
 | [ClassDoc/28-阶段1测试报告.md](../ClassDoc/28-阶段1测试报告.md) | 阶段1验收 |
 | [ClassDoc/29-标签侧栏手工与UX改进记录.md](../ClassDoc/29-标签侧栏手工与UX改进记录.md) | 侧栏标签点选/自定义 |
 | [ClassDoc/30-全端UX审计与改进计划.md](../ClassDoc/30-全端UX审计与改进计划.md) | 全端审计与分阶段改进计划 |
+| [ClassDoc/31-阶段A建议诚实化与聊天文案.md](../ClassDoc/31-阶段A建议诚实化与聊天文案.md) | 阶段 A |
+| [ClassDoc/32-阶段B日程写路径补齐.md](../ClassDoc/32-阶段B日程写路径补齐.md) | 阶段 B |
+| [ClassDoc/33-阶段C侧栏壳与体验收尾.md](../ClassDoc/33-阶段C侧栏壳与体验收尾.md) | 阶段 C |
+| [ClassDoc/34-阶段D管理后台产品化起步.md](../ClassDoc/34-阶段D管理后台产品化起步.md) | 阶段 D.1～D.3 |
+| [ClassDoc/35-阶段D管理后台写路径与筛选.md](../ClassDoc/35-阶段D管理后台写路径与筛选.md) | 阶段 D.4～D.6 |

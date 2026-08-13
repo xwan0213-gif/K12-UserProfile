@@ -95,12 +95,9 @@ async def patch_org(
     org = await db.get(Org, org_id)
     if org is None or org.deleted_at is not None:
         raise AppError(ErrorCode.NOT_FOUND, "组织不存在", http_status=404)
-    if body.name is not None:
-        org.name = body.name
-    if body.parent_id is not None:
-        org.parent_id = body.parent_id
-    if body.code is not None:
-        org.code = body.code
+    # exclude_unset 以便显式传 null 可清空 parent_id / code
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(org, k, v)
     await db.commit()
     return ok({"id": org.id})
 

@@ -11,6 +11,7 @@ export type NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', name: 'dashboard', label: '看板', roles: ['admin', 'regional', 'advisor'] },
   { to: '/customers', name: 'customers', label: '客户', roles: ['admin', 'regional', 'advisor'] },
+  { to: '/orgs', name: 'orgs', label: '组织', roles: ['admin', 'regional'] },
   { to: '/users', name: 'users', label: '员工', roles: ['admin', 'regional'] },
   { to: '/orders', name: 'orders', label: '订单', roles: ['admin', 'regional', 'advisor'] },
   { to: '/tags', name: 'tags', label: '标签', roles: ['admin', 'regional', 'advisor'] },
@@ -24,4 +25,20 @@ export function navForRole(role: string): NavItem[] {
 
 export function canWriteScripts(role: string) {
   return role === 'admin' || role === 'regional'
+}
+
+export function canWriteTags(role: string) {
+  return role === 'admin' || role === 'regional'
+}
+
+export function canWriteOrgs(role: string) {
+  return role === 'admin'
+}
+
+export function canWriteUsers(role: string) {
+  return role === 'admin' || role === 'regional'
+}
+
+export function canCreateAccount(role: string) {
+  return role === 'admin'
 }

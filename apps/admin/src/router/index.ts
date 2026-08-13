@@ -7,6 +7,7 @@ import DashboardView from '../views/DashboardView.vue'
 import CustomersView from '../views/CustomersView.vue'
 import CustomerDetailView from '../views/CustomerDetailView.vue'
 import UsersView from '../views/UsersView.vue'
+import OrgsView from '../views/OrgsView.vue'
 import OrdersView from '../views/OrdersView.vue'
 import TagsView from '../views/TagsView.vue'
 import ScriptsView from '../views/ScriptsView.vue'
@@ -37,6 +38,12 @@ const router = createRouter({
           path: 'users',
           name: 'users',
           component: UsersView,
+          meta: { roles: ['admin', 'regional'] },
+        },
+        {
+          path: 'orgs',
+          name: 'orgs',
+          component: OrgsView,
           meta: { roles: ['admin', 'regional'] },
         },
         { path: 'orders', name: 'orders', component: OrdersView },
