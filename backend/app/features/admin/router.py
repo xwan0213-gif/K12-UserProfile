@@ -3,7 +3,7 @@
 权限说明：多数写操作限 admin / regional；客户与订单查询会叠加数据范围（scope）。
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -953,7 +953,7 @@ async def dashboard_summary(
     db: DbSession,
     org_id: int | None = None,
 ) -> dict[str, Any]:
-    """看板摘要：漏斗（线索/意向/体验/成交）、续费率占位、顾问排行。"""
+    """看板摘要：漏斗、续费率占位、顾问排行（含近7日AI使用）、管理层AI脉搏。"""
     q = select(Customer).where(Customer.deleted_at.is_(None))
     q = await apply_scope(q, user, db)
     if org_id is not None and user["role"] == "admin":
@@ -985,24 +985,116 @@ async def dashboard_summary(
     trial = sum(1 for o in paid_orders if o.title and "体验" in o.title)
     deal = len({o.customer_id for o in paid_orders})
 
-    # 顾问 Top5：按范围内客户数排序
-    advisor_rows = (
+    advisor_q = select(AppUser).where(
+        AppUser.role == "advisor", AppUser.deleted_at.is_(None)
+    )
+    if user["role"] == "regional" and user.get("org_id"):
+        advisor_q = advisor_q.where(AppUser.org_id == user["org_id"])
+    if org_id is not None and user["role"] == "admin":
+        advisor_q = advisor_q.where(AppUser.org_id == org_id)
+    if user["role"] == "advisor":
+        advisor_q = advisor_q.where(AppUser.id == user["id"])
+    advisors = {u.id: u for u in (await db.execute(advisor_q)).scalars().all()}
+    advisor_ids = list(advisors.keys()) or [-1]
+
+    now = utcnow_naive()
+    this_start = now - timedelta(days=7)
+    prev_start = now - timedelta(days=14)
+
+    # 近 7 日各顾问 AI 动作次数（复制/有用/不适用/编辑有用）
+    week_action_rows = (
         await db.execute(
-            select(AppUser.id, AppUser.name, func.count(Customer.id))
-            .outerjoin(Customer, Customer.owner_user_id == AppUser.id)
+            select(EventLog.user_id, func.count(EventLog.id))
             .where(
-                AppUser.role == "advisor",
-                AppUser.deleted_at.is_(None),
-                or_(Customer.id.is_(None), Customer.id.in_(customer_ids)),
+                EventLog.user_id.in_(advisor_ids),
+                EventLog.action.in_(
+                    ("reply_copy", "reply_adopt", "reply_reject", "reply_edit_adopt")
+                ),
+                EventLog.created_at >= this_start,
             )
-            .group_by(AppUser.id, AppUser.name)
-            .order_by(func.count(Customer.id).desc())
-            .limit(5)
+            .group_by(EventLog.user_id)
         )
     ).all()
+    week_actions = {int(uid): int(cnt) for uid, cnt in week_action_rows if uid}
+
+    # 顾问 Top：先按近 7 日动作，再按客户数
+    ranked = sorted(
+        advisors.values(),
+        key=lambda u: (week_actions.get(u.id, 0), sum(1 for c in customers if c.owner_user_id == u.id)),
+        reverse=True,
+    )[:5]
 
     # MVP：有成交时用固定占位续费率
     renewal_rate = 0.63 if deal else 0.0
+
+    async def _period_pulse(start: datetime, end: datetime) -> dict[str, Any]:
+        """统计时间窗内建议曝光与有用/不适用反馈。"""
+        impress = (
+            await db.execute(
+                select(func.count(Suggestion.id)).where(
+                    Suggestion.status.in_(
+                        ("shown", "adopted", "rejected", "edit_adopted")
+                    ),
+                    Suggestion.created_by_user.in_(advisor_ids),
+                    Suggestion.created_at >= start,
+                    Suggestion.created_at < end,
+                )
+            )
+        ).scalar_one()
+        events = (
+            await db.execute(
+                select(EventLog.action, func.count(EventLog.id))
+                .where(
+                    EventLog.user_id.in_(advisor_ids),
+                    EventLog.action.in_(
+                        ("reply_adopt", "reply_edit_adopt", "reply_reject", "reply_copy")
+                    ),
+                    EventLog.created_at >= start,
+                    EventLog.created_at < end,
+                )
+                .group_by(EventLog.action)
+            )
+        ).all()
+        counts = {a: int(c) for a, c in events}
+        useful = counts.get("reply_adopt", 0) + counts.get("reply_edit_adopt", 0)
+        reject = counts.get("reply_reject", 0)
+        denom = useful + reject
+        return {
+            "impressions": int(impress or 0),
+            "useful": useful,
+            "reject": reject,
+            "copy": counts.get("reply_copy", 0),
+            "adoption_rate": round(useful / denom, 4) if denom else None,
+        }
+
+    ai_pulse: dict[str, Any] | None = None
+    if user["role"] in ("admin", "regional"):
+        this_p = await _period_pulse(this_start, now)
+        prev_p = await _period_pulse(prev_start, this_start)
+        this_rate = this_p["adoption_rate"]
+        prev_rate = prev_p["adoption_rate"]
+        wow = None
+        if this_rate is not None and prev_rate is not None:
+            wow = round(this_rate - prev_rate, 4)
+        elif this_rate is not None and prev_rate is None:
+            wow = None  # 上期无反馈，不硬算环比
+        top_uid = max(week_actions, key=week_actions.get) if week_actions else None
+        top_adv = advisors.get(top_uid) if top_uid else None
+        ai_pulse = {
+            "window_days": 7,
+            "this_period": this_p,
+            "prev_period": prev_p,
+            "wow_delta": wow,
+            "top_advisor": (
+                {
+                    "user_id": top_adv.id,
+                    "name": top_adv.name,
+                    "week_actions": week_actions.get(top_adv.id, 0),
+                }
+                if top_adv
+                else None
+            ),
+        }
 
     return ok(
         {
@@ -1012,16 +1104,23 @@ async def dashboard_summary(
                 "trial": trial,
                 "deal": deal,
             },
+            "funnel_labels": {
+                "lead": "线索（范围内客户）",
+                "intent": "意向（高意向/近期决策标签）",
+                "trial": "体验（付费订单标题含「体验」）",
+                "deal": "成交（付费客户去重）",
+            },
             "renewal_rate": renewal_rate,
+            "renewal_note": "MVP 占位口径：有成交时暂按 63% 展示，后续接真实续费订单。",
             "advisor_top": [
                 {
-                    "user_id": r.id,
-                    "name": r.name,
-                    "customers": int(r[2] or 0),
-                    "deals": 0,
-                    "score": min(100, 60 + int(r[2] or 0) * 5),
+                    "user_id": u.id,
+                    "name": u.name,
+                    "customers": sum(1 for c in customers if c.owner_user_id == u.id),
+                    "week_actions": week_actions.get(u.id, 0),
                 }
-                for r in advisor_rows
+                for u in ranked
             ],
+            "ai_pulse": ai_pulse,
         }
     )

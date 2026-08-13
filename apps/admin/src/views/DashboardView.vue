@@ -1,12 +1,60 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
+import AdvisorRankList from '../components/analytics/AdvisorRankList.vue'
+import FunnelBars from '../components/analytics/FunnelBars.vue'
+import InsightCards from '../components/analytics/InsightCards.vue'
+import MetricGlossary from '../components/analytics/MetricGlossary.vue'
 import { useAuth } from '../composables/useAuth'
+import { formatPercent, formatWowDelta, wowTone } from '../utils/analyticsFormat'
 
-const { api } = useAuth()
+const { api, role } = useAuth()
 const data = ref<any>(null)
 const error = ref('')
 const loading = ref(true)
+
+const insightItems = computed(() => {
+  const pulse = data.value?.ai_pulse
+  if (!pulse) return []
+  const thisP = pulse.this_period || {}
+  const tone = wowTone(pulse.wow_delta)
+  const top = pulse.top_advisor
+  return [
+    {
+      key: 'rate',
+      label: '近 7 日建议采纳率',
+      value: formatPercent(thisP.adoption_rate, 0),
+      hint:
+        thisP.adoption_rate == null
+          ? '顾问尚未标记「有用/不适用」'
+          : `有用 ${thisP.useful || 0} · 不适用 ${thisP.reject || 0}`,
+    },
+    {
+      key: 'wow',
+      label: '较前 7 日',
+      value: formatWowDelta(pulse.wow_delta),
+      hint:
+        pulse.prev_period?.adoption_rate == null
+          ? '上期无反馈，暂不对比'
+          : `上期 ${formatPercent(pulse.prev_period.adoption_rate, 0)}`,
+      tone,
+    },
+    {
+      key: 'top',
+      label: '近 7 日最活跃顾问',
+      value: top?.name || '暂无',
+      hint: top
+        ? `AI 使用 ${top.week_actions} 次（复制/有用/不适用等）`
+        : '暂无侧栏反馈埋点',
+    },
+  ]
+})
+
+const emptyFunnel = computed(() => {
+  const f = data.value?.funnel
+  if (!f) return true
+  return !(f.lead || f.intent || f.trial || f.deal)
+})
 
 onMounted(async () => {
   loading.value = true
@@ -23,46 +71,73 @@ onMounted(async () => {
 
 <template>
   <section class="card">
-    <h2>看板</h2>
+    <h2>经营看板</h2>
+    <p class="lead muted">先看结论，再下钻漏斗与顾问人效。</p>
+
     <p v-if="loading" class="muted">加载中…</p>
-    <EmptyState v-else-if="error" :title="error" hint="若无权限或会话过期，请重新登录。" />
+    <EmptyState
+      v-else-if="error"
+      :title="error"
+      hint="若无权限或会话过期，请重新登录。"
+    />
     <template v-else-if="data">
-      <div class="grid">
-        <div><span>线索</span><strong>{{ data.funnel?.lead ?? 0 }}</strong></div>
-        <div><span>意向</span><strong>{{ data.funnel?.intent ?? 0 }}</strong></div>
-        <div><span>试听</span><strong>{{ data.funnel?.trial ?? 0 }}</strong></div>
-        <div><span>成交</span><strong>{{ data.funnel?.deal ?? 0 }}</strong></div>
-      </div>
-      <p class="muted">续费率（MVP 口径）：{{ data.renewal_rate }}</p>
+      <InsightCards v-if="insightItems.length" :items="insightItems" />
+      <p v-else-if="role === 'advisor'" class="muted tip">
+        顾问视角：下方为您可见范围内的客户漏斗；团队 AI 采纳请联系主管查看「AI 分析」。
+      </p>
+
+      <h3>转化漏斗</h3>
+      <EmptyState
+        v-if="emptyFunnel"
+        title="暂无漏斗数据"
+        hint="可见范围内还没有客户，或尚未 seed 演示数据。"
+      />
+      <FunnelBars v-else :funnel="data.funnel" :labels="data.funnel_labels" />
+
+      <p class="renewal">
+        续费率（参考）
+        <strong>{{ formatPercent(data.renewal_rate, 0) }}</strong>
+        <span class="muted"> · {{ data.renewal_note }}</span>
+      </p>
+
       <h3>顾问人效 Top</h3>
-      <ul v-if="(data.advisor_top || []).length">
-        <li v-for="a in data.advisor_top" :key="a.user_id">
-          {{ a.name }} · 客户 {{ a.customers }} · score {{ a.score }}
-        </li>
-      </ul>
-      <EmptyState v-else title="暂无顾问排行数据" />
+      <EmptyState
+        v-if="!(data.advisor_top || []).length"
+        title="暂无顾问排行"
+        hint="范围内没有启用顾问，或尚未分配客户。"
+      />
+      <AdvisorRankList v-else :items="data.advisor_top" />
+
+      <MetricGlossary />
     </template>
   </section>
 </template>
 
 <style scoped>
-h2 { margin: 0 0 10px; font-size: 1.05rem; }
-h3 { margin: 14px 0 6px; font-size: 0.95rem; }
-.grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+h2 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
 }
-.grid div {
-  background: #f8fafc;
-  border-radius: 8px;
-  padding: 10px;
-  display: grid;
+.lead {
+  margin: 0 0 14px;
+  font-size: 13px;
 }
-.grid span { color: var(--muted); font-size: 12px; }
-.grid strong { font-size: 1.3rem; }
-ul { margin: 0; padding-left: 18px; }
-@media (max-width: 700px) {
-  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+h3 {
+  margin: 16px 0 8px;
+  font-size: 0.95rem;
+}
+.renewal {
+  margin: 14px 0 0;
+  font-size: 13px;
+}
+.renewal strong {
+  margin-left: 4px;
+}
+.tip {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.muted {
+  color: var(--muted);
 }
 </style>
