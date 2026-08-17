@@ -14,7 +14,6 @@ const emit = defineEmits<{
 
 const weakTip = ref(true)
 const strongNotify = ref(true)
-/** 每行一个时段，如 22:00-08:00 */
 const quietText = ref('')
 
 watch(
@@ -44,57 +43,37 @@ function onSave() {
 </script>
 
 <template>
-  <div v-if="open" class="pref">
-    <p class="muted">弱提示走侧栏 SSE；强提醒走企微应用消息，无权限时会降级并仅记日志。</p>
-    <label>
+  <div v-if="open" class="my-2 mb-3 rounded-panel border border-line bg-stone-50 p-2.5">
+    <p class="mb-1.5 text-xs text-muted">弱提示走侧栏 SSE；强提醒走企微应用消息，无权限时会降级并仅记日志。</p>
+    <label class="my-1.5 flex items-center gap-1.5 text-[13px]">
       <input v-model="weakTip" type="checkbox" />
       侧边栏弱提示
     </label>
-    <label>
+    <label class="my-1.5 flex items-center gap-1.5 text-[13px]">
       <input v-model="strongNotify" type="checkbox" />
       高优强提醒（企微，可降级）
     </label>
-    <label class="quiet">
+    <label class="my-1.5 flex flex-col gap-1 text-[13px] text-muted">
       免打扰时段（每行一个，如 22:00-08:00）
-      <textarea v-model="quietText" rows="2" placeholder="22:00-08:00" />
+      <textarea
+        v-model="quietText"
+        rows="2"
+        placeholder="22:00-08:00"
+        class="resize-y rounded-control border border-line px-2 py-1.5 text-ink"
+      />
     </label>
-    <p v-if="quietPreview.length" class="muted chips">
-      将保存：{{ quietPreview.join('、') }}
-    </p>
-    <div class="actions">
-      <button type="button" class="primary" @click="onSave">保存偏好</button>
-      <button type="button" @click="emit('update:open', false)">关闭</button>
+    <p v-if="quietPreview.length" class="mt-1 text-xs text-muted">将保存：{{ quietPreview.join('、') }}</p>
+    <div class="mt-2 flex gap-2">
+      <button type="button" class="rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white" @click="onSave">
+        保存偏好
+      </button>
+      <button
+        type="button"
+        class="rounded-control border border-line bg-white px-3 py-1.5 text-sm"
+        @click="emit('update:open', false)"
+      >
+        关闭
+      </button>
     </div>
   </div>
 </template>
-
-<style scoped>
-.pref {
-  margin: 8px 0 12px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #f8fafc;
-}
-.pref label {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin: 6px 0;
-  font-size: 13px;
-}
-.quiet {
-  flex-direction: column;
-  align-items: stretch !important;
-}
-.quiet textarea {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 8px;
-  font: inherit;
-  resize: vertical;
-}
-.muted { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
-.chips { margin-top: 4px; }
-.actions { display: flex; gap: 8px; margin-top: 8px; }
-</style>

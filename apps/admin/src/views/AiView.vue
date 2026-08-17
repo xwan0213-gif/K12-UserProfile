@@ -87,37 +87,41 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="card">
-    <h2>AI 使用分析</h2>
-    <p class="lead muted">看顾问是否真的在用建议：复制、标记有用、不适用。</p>
+  <section class="rounded-panel border border-line bg-white p-5 shadow-soft">
+    <div class="mb-4">
+      <h2 class="font-display text-lg font-semibold">AI 使用分析</h2>
+      <p class="mt-1 text-sm text-muted">看顾问是否真的在用建议：复制、标记有用、不适用。</p>
+    </div>
 
-    <form class="filters" @submit.prevent="load">
-      <label>
+    <form class="mb-4 flex flex-wrap items-end gap-2" @submit.prevent="load">
+      <label class="grid gap-1 text-xs text-muted">
         怎么看
-        <select v-model="groupBy">
+        <select v-model="groupBy" class="rounded-control border border-line px-2.5 py-1.5 text-sm">
           <option value="advisor">按顾问汇总</option>
           <option value="day">按日下钻</option>
         </select>
       </label>
-      <label>
+      <label class="grid gap-1 text-xs text-muted">
         从
-        <input v-model="fromDate" type="date" />
+        <input v-model="fromDate" type="date" class="rounded-control border border-line px-2.5 py-1.5 text-sm" />
       </label>
-      <label>
+      <label class="grid gap-1 text-xs text-muted">
         到
-        <input v-model="toDate" type="date" />
+        <input v-model="toDate" type="date" class="rounded-control border border-line px-2.5 py-1.5 text-sm" />
       </label>
-      <label v-if="role === 'admin'">
+      <label v-if="role === 'admin'" class="grid gap-1 text-xs text-muted">
         组织
-        <select v-model="orgId">
+        <select v-model="orgId" class="rounded-control border border-line px-2.5 py-1.5 text-sm">
           <option value="">全部</option>
           <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
         </select>
       </label>
-      <button type="submit" class="primary">查询</button>
+      <button type="submit" class="rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white">
+        查询
+      </button>
     </form>
 
-    <p v-if="loading" class="muted">加载中…</p>
+    <p v-if="loading" class="text-sm text-muted">加载中…</p>
     <EmptyState v-else-if="error" :title="error" />
     <EmptyState
       v-else-if="!rows.length"
@@ -127,72 +131,44 @@ onMounted(async () => {
     <template v-else>
       <InsightCards :items="insightItems" />
 
-      <table class="data">
-        <thead>
-          <tr>
-            <th v-if="groupBy === 'day'">日期</th>
-            <th>顾问</th>
-            <th>曝光</th>
-            <th>复制到企微</th>
-            <th>标记有用</th>
-            <th>编辑后有用</th>
-            <th>不适用</th>
-            <th>标签确认</th>
-            <th>标签拒绝</th>
-            <th>采纳率</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, i) in rows" :key="i">
-            <td v-if="groupBy === 'day'">{{ row.day || '—' }}</td>
-            <td>{{ row.name }}</td>
-            <td>{{ row.impressions }}</td>
-            <td>{{ row.copy }}</td>
-            <td>{{ row.adopt }}</td>
-            <td>{{ row.edit_adopt }}</td>
-            <td>{{ row.reject }}</td>
-            <td>{{ row.tag_confirm }}</td>
-            <td>{{ row.tag_reject }}</td>
-            <td>{{ formatPercent(row.adoption_rate, 0) }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-line text-muted">
+            <tr>
+              <th v-if="groupBy === 'day'" class="pb-2 pr-3 font-medium">日期</th>
+              <th class="pb-2 pr-3 font-medium">顾问</th>
+              <th class="pb-2 pr-3 font-medium">曝光</th>
+              <th class="pb-2 pr-3 font-medium">复制到企微</th>
+              <th class="pb-2 pr-3 font-medium">标记有用</th>
+              <th class="pb-2 pr-3 font-medium">编辑后有用</th>
+              <th class="pb-2 pr-3 font-medium">不适用</th>
+              <th class="pb-2 pr-3 font-medium">标签确认</th>
+              <th class="pb-2 pr-3 font-medium">标签拒绝</th>
+              <th class="pb-2 font-medium">采纳率</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(row, i) in rows"
+              :key="i"
+              class="border-b border-line/60 hover:bg-fjord-soft/40"
+            >
+              <td v-if="groupBy === 'day'" class="py-2 pr-3">{{ row.day || '—' }}</td>
+              <td class="py-2 pr-3">{{ row.name }}</td>
+              <td class="py-2 pr-3">{{ row.impressions }}</td>
+              <td class="py-2 pr-3">{{ row.copy }}</td>
+              <td class="py-2 pr-3">{{ row.adopt }}</td>
+              <td class="py-2 pr-3">{{ row.edit_adopt }}</td>
+              <td class="py-2 pr-3">{{ row.reject }}</td>
+              <td class="py-2 pr-3">{{ row.tag_confirm }}</td>
+              <td class="py-2 pr-3">{{ row.tag_reject }}</td>
+              <td class="py-2">{{ formatPercent(row.adoption_rate, 0) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <MetricGlossary />
     </template>
   </section>
 </template>
-
-<style scoped>
-h2 {
-  margin: 0 0 4px;
-  font-size: 1.05rem;
-}
-.lead {
-  margin: 0 0 12px;
-  font-size: 13px;
-}
-.filters {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: end;
-  margin-bottom: 12px;
-}
-.filters label {
-  display: grid;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--muted);
-}
-.filters input,
-.filters select {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 8px;
-  color: var(--ink);
-}
-.muted {
-  color: var(--muted);
-}
-</style>

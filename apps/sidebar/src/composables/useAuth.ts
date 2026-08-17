@@ -4,17 +4,16 @@ import {
   clearToken,
   consumeHashToken,
   goToAdminWithToken,
-  goToSidebarWithToken,
   readToken,
   writeToken,
 } from '../lib/authStorage'
 
-export type AdminRole = 'admin' | 'regional' | 'advisor'
+export type SidebarRole = 'admin' | 'regional' | 'advisor'
 
-export type AdminUser = {
+export type SidebarUser = {
   id: number
   name: string
-  role: AdminRole | string
+  role: SidebarRole | string
   org_id?: number | null
 }
 
@@ -22,13 +21,24 @@ const hashTok = typeof window !== 'undefined' ? consumeHashToken() : null
 if (hashTok) writeToken(hashTok)
 
 const token = ref(readToken())
-const me = shallowRef<AdminUser | null>(null)
+const me = shallowRef<SidebarUser | null>(null)
 const status = ref(token.value ? '已恢复本地登录' : '未登录')
 
 const api = createApi(() => token.value)
 
 const loggedIn = computed(() => !!token.value)
 const role = computed(() => (me.value?.role || '') as string)
+
+function isManager(r?: string) {
+  return r === 'admin' || r === 'regional'
+}
+
+export function roleLabel(role?: string) {
+  if (role === 'admin') return '管理员'
+  if (role === 'regional') return '区域主管'
+  if (role === 'advisor') return '顾问'
+  return role || '—'
+}
 
 export function useAuth() {
   async function login(loginName: string, password: string) {
@@ -41,16 +51,7 @@ export function useAuth() {
     writeToken(token.value)
     me.value = data.user
     status.value = `已登录：${data.user.name}（${roleLabel(data.user.role)}）`
-    return data.user as AdminUser
-  }
-
-  /** After login: advisors go to sidebar; managers stay in admin. */
-  function routeAfterLogin(user: AdminUser) {
-    if (user.role === 'advisor') {
-      goToSidebarWithToken(token.value)
-      return 'sidebar' as const
-    }
-    return 'admin' as const
+    return data.user as SidebarUser
   }
 
   async function loadMe() {
@@ -61,6 +62,33 @@ export function useAuth() {
     return me.value
   }
 
+  /** Returns true if redirected away (non-advisor). */
+  function redirectManagerToAdmin(): boolean {
+    if (token.value && isManager(me.value?.role)) {
+      goToAdminWithToken(token.value)
+      return true
+    }
+    return false
+  }
+
+  async function bootSession(): Promise<'login' | 'redirect' | 'workbench'> {
+    if (!token.value) return 'login'
+    try {
+      const u = me.value || (await loadMe())
+      if (isManager(u?.role)) {
+        redirectManagerToAdmin()
+        return 'redirect'
+      }
+      return 'workbench'
+    } catch {
+      token.value = ''
+      clearToken()
+      me.value = null
+      status.value = '登录已失效'
+      return 'login'
+    }
+  }
+
   function logout() {
     token.value = ''
     me.value = null
@@ -68,16 +96,13 @@ export function useAuth() {
     status.value = '已退出'
   }
 
+  function setToken(next: string) {
+    token.value = next
+    writeToken(next)
+  }
+
   function hasRole(...roles: string[]) {
     return roles.includes(role.value)
-  }
-
-  function redirectAdvisorAway() {
-    if (token.value) goToSidebarWithToken(token.value)
-  }
-
-  function redirectManagerToAdmin() {
-    if (token.value) goToAdminWithToken(token.value)
   }
 
   return {
@@ -90,16 +115,9 @@ export function useAuth() {
     login,
     loadMe,
     logout,
+    setToken,
     hasRole,
-    routeAfterLogin,
-    redirectAdvisorAway,
+    bootSession,
     redirectManagerToAdmin,
   }
-}
-
-export function roleLabel(role?: string) {
-  if (role === 'admin') return '管理员'
-  if (role === 'regional') return '区域主管'
-  if (role === 'advisor') return '顾问'
-  return role || '—'
 }

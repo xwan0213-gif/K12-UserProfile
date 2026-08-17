@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { navForRole } from '../nav'
+import { goToSidebarWithToken } from '../lib/authStorage'
 import AdminLayout from '../layouts/AdminLayout.vue'
 import LoginView from '../views/LoginView.vue'
 import DashboardView from '../views/DashboardView.vue'
@@ -61,10 +62,24 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
-  const { loggedIn, loadMe, me, role, logout } = useAuth()
+  const { loggedIn, loadMe, me, role, logout, token } = useAuth()
 
   if (to.meta.public) {
-    if (loggedIn.value && to.name === 'login') return { name: 'dashboard' }
+    if (loggedIn.value && to.name === 'login') {
+      if (!me.value) {
+        try {
+          await loadMe()
+        } catch {
+          logout()
+          return true
+        }
+      }
+      if (role.value === 'advisor') {
+        goToSidebarWithToken(token.value)
+        return false
+      }
+      return { name: 'dashboard' }
+    }
     return true
   }
 
@@ -79,6 +94,11 @@ router.beforeEach(async (to) => {
       logout()
       return { name: 'login', query: { redirect: to.fullPath } }
     }
+  }
+
+  if (role.value === 'advisor') {
+    goToSidebarWithToken(token.value)
+    return false
   }
 
   const allowedRoles = to.meta.roles as string[] | undefined

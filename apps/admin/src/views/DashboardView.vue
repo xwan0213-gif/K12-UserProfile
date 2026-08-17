@@ -70,11 +70,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="card">
-    <h2>经营看板</h2>
-    <p class="lead muted">先看结论，再下钻漏斗与顾问人效。</p>
+  <section class="rounded-panel border border-line bg-white p-5 shadow-soft">
+    <div class="mb-4">
+      <h2 class="font-display text-lg font-semibold">经营看板</h2>
+      <p class="mt-1 text-sm text-muted">先看结论，再下钻漏斗与顾问人效。</p>
+    </div>
 
-    <p v-if="loading" class="muted">加载中…</p>
+    <p v-if="loading" class="text-sm text-muted">加载中…</p>
     <EmptyState
       v-else-if="error"
       :title="error"
@@ -82,11 +84,11 @@ onMounted(async () => {
     />
     <template v-else-if="data">
       <InsightCards v-if="insightItems.length" :items="insightItems" />
-      <p v-else-if="role === 'advisor'" class="muted tip">
+      <p v-else-if="role === 'advisor'" class="mb-3 text-sm text-muted">
         顾问视角：下方为您可见范围内的客户漏斗；团队 AI 采纳请联系主管查看「AI 分析」。
       </p>
 
-      <h3>转化漏斗</h3>
+      <h3 class="mb-2 mt-4 font-display text-base font-semibold">转化漏斗</h3>
       <EmptyState
         v-if="emptyFunnel"
         title="暂无漏斗数据"
@@ -94,13 +96,13 @@ onMounted(async () => {
       />
       <FunnelBars v-else :funnel="data.funnel" :labels="data.funnel_labels" />
 
-      <p class="renewal">
+      <p class="mt-3.5 text-sm">
         续费率（参考）
-        <strong>{{ formatPercent(data.renewal_rate, 0) }}</strong>
-        <span class="muted"> · {{ data.renewal_note }}</span>
+        <strong class="ml-1">{{ formatPercent(data.renewal_rate, 0) }}</strong>
+        <span class="text-muted"> · {{ data.renewal_note }}</span>
       </p>
 
-      <h3>顾问人效 Top</h3>
+      <h3 class="mb-2 mt-4 font-display text-base font-semibold">顾问人效 Top</h3>
       <EmptyState
         v-if="!(data.advisor_top || []).length"
         title="暂无顾问排行"
@@ -112,32 +114,3 @@ onMounted(async () => {
     </template>
   </section>
 </template>
-
-<style scoped>
-h2 {
-  margin: 0 0 4px;
-  font-size: 1.05rem;
-}
-.lead {
-  margin: 0 0 14px;
-  font-size: 13px;
-}
-h3 {
-  margin: 16px 0 8px;
-  font-size: 0.95rem;
-}
-.renewal {
-  margin: 14px 0 0;
-  font-size: 13px;
-}
-.renewal strong {
-  margin-left: 4px;
-}
-.tip {
-  margin: 0 0 12px;
-  font-size: 13px;
-}
-.muted {
-  color: var(--muted);
-}
-</style>

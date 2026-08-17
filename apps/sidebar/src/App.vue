@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Calendar, LogOut, MessageSquare, Tags, User } from '@lucide/vue'
 import CapabilityBar from './components/CapabilityBar.vue'
 import CustomerHeader from './components/CustomerHeader.vue'
 import ChatPanel from './components/chat/ChatPanel.vue'
+import LoginView from './components/LoginView.vue'
 import ProfilePanel from './components/profile/ProfilePanel.vue'
 import SuggestPanel from './components/suggest/SuggestPanel.vue'
 import type { ReplyOutcome } from './components/suggest/SuggestPanel.vue'
@@ -10,16 +12,20 @@ import TagsPanel from './components/tags/TagsPanel.vue'
 import SchedulePanel from './components/SchedulePanel.vue'
 import WeakTipBar from './components/WeakTipBar.vue'
 import AppToast from './components/shell/AppToast.vue'
-import { createApi } from './composables/useApi'
+import UiIcon from './components/UiIcon.vue'
+import { useAuth } from './composables/useAuth'
 import { createSseClient } from './composables/useSse'
 import { useToast } from './composables/useToast'
 
+const { api, token, me, status: authStatus, loggedIn, logout, bootSession, setToken } = useAuth()
+
+const ready = ref(false)
 const status = ref('idle')
-const token = ref('')
 const customerId = ref<number | null>(null)
 const externalUserId = ref('demo_wang')
 const tab = ref<'profile' | 'tags' | 'suggest' | 'schedule'>('profile')
 const showChat = ref(true)
+const aiStale = ref(false)
 const context = ref<any>(null)
 const profile = ref<any>(null)
 const tags = ref<any>(null)
@@ -47,9 +53,15 @@ const healthFlags = ref({
 })
 const demoOpen = ref(false)
 
-const api = createApi(() => token.value)
 const toast = useToast()
 const generating = computed(() => !!profile.value?.generating)
+
+const tabs = [
+  { id: 'profile' as const, label: '画像', icon: User },
+  { id: 'tags' as const, label: '标签', icon: Tags },
+  { id: 'suggest' as const, label: '建议', icon: MessageSquare },
+  { id: 'schedule' as const, label: '日程', icon: Calendar },
+]
 
 function notify(msg: string, kind: 'info' | 'ok' | 'warn' | 'err' = 'info') {
   status.value = msg
@@ -136,24 +148,50 @@ async function loadCustomers() {
   customers.value = data.items || []
 }
 
-async function exchange() {
-  status.value = '换票中…'
-  const data = await api('/auth/wecom/exchange', {
-    method: 'POST',
-    body: JSON.stringify({
-      code: 'mock_code',
-      external_userid: externalUserId.value || undefined,
-    }),
-  })
-  token.value = data.access_token
-  if (data.customer_id) customerId.value = data.customer_id
-  notify(`已登录：${data.user.name}`, 'ok')
+async function enterWorkbench() {
   await loadCustomers()
   if (!customerId.value && customers.value.length) {
     customerId.value = customers.value[0].id
+    const first = customers.value[0]
+    if (first?.external_id) externalUserId.value = first.external_id
   }
   await refreshAll()
   sse.connect()
+}
+
+async function onLoggedIn() {
+  ready.value = true
+  notify(authStatus.value, 'ok')
+  await enterWorkbench()
+}
+
+async function mockExchange() {
+  status.value = '换票中…'
+  try {
+    const data = await api('/auth/wecom/exchange', {
+      method: 'POST',
+      body: JSON.stringify({
+        code: 'mock_code',
+        external_userid: externalUserId.value || undefined,
+      }),
+    })
+    setToken(data.access_token)
+    if (data.customer_id) customerId.value = data.customer_id
+    notify(`演示换票：${data.user.name}`, 'ok')
+    await loadCustomers()
+    if (!customerId.value && customers.value.length) {
+      customerId.value = customers.value[0].id
+    }
+    await refreshAll()
+    sse.connect()
+  } catch (e: any) {
+    notify(String(e?.message || e), 'err')
+  }
+}
+
+function onSelectCustomer(id: number) {
+  customerId.value = id
+  void switchCustomer()
 }
 
 async function switchCustomer() {
@@ -183,6 +221,10 @@ async function refreshAll() {
   if (tab.value === 'schedule') await schedulePanel.value?.load()
 }
 
+function onChatStale() {
+  aiStale.value = true
+}
+
 async function onSceneChange(scene: 'sales' | 'cs') {
   replyScene.value = scene
   replyOutcome.value = null
@@ -191,9 +233,11 @@ async function onSceneChange(scene: 'sales' | 'cs') {
 
 async function suggestReply() {
   if (!customerId.value) return
+  aiStale.value = false
   replyBusy.value = true
   replyOutcome.value = null
   status.value = '生成话术建议…'
+  const prevId = reply.value?.suggestion_id ?? null
   try {
     await api('/sidebar/reply/suggest', {
       method: 'POST',
@@ -207,13 +251,17 @@ async function suggestReply() {
       reply.value = await api(
         `/sidebar/reply/latest?customer_id=${customerId.value}&scene=${replyScene.value}`,
       )
-      if (reply.value?.primary) break
+      const nextId = reply.value?.suggestion_id
+      // 必须等新 suggestion，不能把旧话术当成「已生成完成」
+      if (nextId != null && nextId !== prevId && reply.value?.primary) break
       await new Promise((r) => setTimeout(r, 800))
     }
     if (reply.value?.based_on_asr) lastAsr.value = reply.value.based_on_asr
+    const fresh =
+      reply.value?.suggestion_id != null && reply.value.suggestion_id !== prevId
     notify(
-      reply.value?.primary ? '已生成话术建议' : '话术生成中，请稍后查看',
-      reply.value?.primary ? 'ok' : 'info',
+      fresh && reply.value?.primary ? '已生成话术建议' : '话术生成中，请稍后查看',
+      fresh && reply.value?.primary ? 'ok' : 'info',
     )
   } finally {
     replyBusy.value = false
@@ -254,7 +302,6 @@ async function replyFeedback(
       suggestionId,
     }
     notify('已复制（请到企微手动发送，系统不代发）', 'ok')
-    // copy 后 status 仍为 shown，保留当前建议
     return
   }
 
@@ -289,8 +336,10 @@ function clearReplyOutcome() {
 
 async function recommendTags() {
   if (!customerId.value || tagRecommendBusy.value) return
+  aiStale.value = false
   tagRecommendBusy.value = true
   status.value = '生成标签推荐…'
+  const prevId = tags.value?.recommendations?.suggestion_id ?? null
   try {
     await api('/sidebar/tags/recommend', {
       method: 'POST',
@@ -298,13 +347,15 @@ async function recommendTags() {
     })
     for (let i = 0; i < 40; i++) {
       tags.value = await api(`/sidebar/tags?customer_id=${customerId.value}`)
-      if (tags.value?.recommendations) break
+      const nextId = tags.value?.recommendations?.suggestion_id
+      if (nextId != null && nextId !== prevId) break
       await new Promise((r) => setTimeout(r, 800))
     }
-    status.value = tags.value?.recommendations
-      ? '已收到标签推荐'
-      : '标签推荐生成中，请稍后刷新'
-    notify(status.value, tags.value?.recommendations ? 'ok' : 'info')
+    const fresh =
+      tags.value?.recommendations?.suggestion_id != null &&
+      tags.value.recommendations.suggestion_id !== prevId
+    status.value = fresh ? '已收到标签推荐' : '标签推荐生成中，请稍后刷新'
+    notify(status.value, fresh ? 'ok' : 'info')
   } catch (e: any) {
     notify(e?.message || '标签推荐失败', 'err')
   } finally {
@@ -349,16 +400,24 @@ async function seedPhysicsScenario() {
 
 async function generate() {
   if (!customerId.value) return
+  aiStale.value = false
   status.value = '画像生成中…'
+  const prevDraftId = profile.value?.draft?.id ?? null
   await api('/sidebar/profile/generate', {
     method: 'POST',
     body: JSON.stringify({ customer_id: customerId.value, force: true }),
   })
   for (let i = 0; i < 40; i++) {
     profile.value = await api(`/sidebar/profile?customer_id=${customerId.value}`)
-    if (profile.value?.draft) break
+    const nextId = profile.value?.draft?.id
+    // 等新草稿 id，或生成结束且草稿已更新
+    if (nextId != null && nextId !== prevDraftId) break
+    if (!profile.value?.generating && nextId != null && nextId !== prevDraftId) break
     await new Promise((r) => setTimeout(r, 800))
   }
+  const fresh =
+    profile.value?.draft?.id != null && profile.value.draft.id !== prevDraftId
+  notify(fresh ? '画像草稿已更新' : '画像生成中，请稍后查看', fresh ? 'ok' : 'info')
 }
 
 async function confirm(mode: 'all' | 'discard') {
@@ -446,6 +505,7 @@ async function patchField(field: string, value: unknown) {
 
 async function suggestSchedule() {
   if (!customerId.value) return
+  aiStale.value = false
   tab.value = 'schedule'
   await schedulePanel.value?.suggest()
 }
@@ -470,11 +530,33 @@ function onPanelStatus(msg: string) {
   notify(msg, kind)
 }
 
+function handleLogout() {
+  sse.disconnect()
+  logout()
+  ready.value = false
+  customerId.value = null
+  context.value = null
+  profile.value = null
+  tags.value = null
+  reply.value = null
+  customers.value = []
+  aiStale.value = false
+}
+
+async function initAuth() {
+  const result = await bootSession()
+  if (result === 'login') {
+    ready.value = false
+    return
+  }
+  if (result === 'redirect') return
+  ready.value = true
+  await enterWorkbench()
+}
+
 onMounted(() => {
   void loadHealth()
-  void exchange().catch((e) => {
-    notify(String(e.message || e), 'err')
-  })
+  void initAuth()
 })
 
 onUnmounted(() => {
@@ -483,39 +565,71 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="page">
+  <LoginView v-if="!loggedIn" @logged-in="onLoggedIn" />
+
+  <div
+    v-else-if="!ready"
+    class="flex min-h-screen items-center justify-center bg-stone-50 text-sm text-muted"
+  >
+    加载中…
+  </div>
+
+  <main v-else class="mx-auto max-w-[1180px] px-4 pb-7 pt-3">
     <CapabilityBar :flags="healthFlags" />
     <AppToast />
 
-    <header class="top">
-      <div>
-        <h1>侧边栏工作台</h1>
-        <p class="sub">{{ status }}</p>
-      </div>
-      <div class="top-actions">
-        <button type="button" class="chat-toggle" @click="showChat = !showChat">
-          {{ showChat ? '隐藏会话' : '会话' }}
-        </button>
+    <header
+      class="sticky top-0 z-20 mb-1 border-b border-line bg-stone-50/90 py-2 backdrop-blur-sm max-md:static max-md:backdrop-blur-none"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="m-0 font-display text-[13px] font-bold tracking-wide text-fjord">擎天学智</p>
+          <h1 class="mt-0.5 font-display text-xl font-semibold text-ink">顾问工作台</h1>
+          <p class="mt-1 text-xs text-muted">{{ status || authStatus }}</p>
+          <p v-if="me" class="mt-0.5 text-xs text-muted">{{ me.name }} · 顾问</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class="whitespace-nowrap rounded-control border border-line bg-white px-3 py-1.5 text-sm text-muted hover:bg-stone-50"
+            @click="showChat = !showChat"
+          >
+            {{ showChat ? '隐藏会话' : '会话' }}
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-control border border-line bg-white px-3 py-1.5 text-sm text-muted hover:bg-stone-50"
+            @click="handleLogout"
+          >
+            <UiIcon :icon="LogOut" :size="16" />
+            退出
+          </button>
+        </div>
       </div>
     </header>
 
-    <div class="toolbar">
-      <label>
-        客户
-        <select v-model.number="customerId" @change="switchCustomer">
-          <option v-for="c in customers" :key="c.id" :value="c.id">
-            #{{ c.id }} {{ c.parent_name }}/{{ c.student_name || '—' }}
-          </option>
-        </select>
-      </label>
-    </div>
-
-    <details class="demo-mode" :open="demoOpen" @toggle="demoOpen = ($event.target as HTMLDetailsElement).open">
-      <summary>演示模式</summary>
-      <div class="demo-body">
-        <button type="button" @click="seedPhysicsScenario">物理场景</button>
-        <button type="button" @click="exchange">重新换票</button>
-        <span class="muted">SSE：{{ sseLog || '等待连接…' }}</span>
+    <details
+      class="mb-2.5 rounded-panel border border-dashed border-line bg-stone-50 px-2.5 py-1 opacity-90"
+      :open="demoOpen"
+      @toggle="demoOpen = ($event.target as HTMLDetailsElement).open"
+    >
+      <summary class="cursor-pointer select-none text-[11px] text-muted">演示模式</summary>
+      <div class="flex flex-wrap items-center gap-2 py-2">
+        <button
+          type="button"
+          class="rounded-control border border-line bg-white px-2 py-1 text-xs hover:bg-stone-50"
+          @click="seedPhysicsScenario"
+        >
+          物理场景
+        </button>
+        <button
+          type="button"
+          class="rounded-control border border-line bg-white px-2 py-1 text-xs hover:bg-stone-50"
+          @click="mockExchange"
+        >
+          Mock 企微换票
+        </button>
+        <span class="text-xs text-muted">SSE：{{ sseLog || '等待连接…' }}</span>
       </div>
     </details>
 
@@ -527,164 +641,117 @@ onUnmounted(() => {
       @open="openWeakTipSchedule"
     />
 
-    <div class="bench" :class="{ 'chat-hidden': !showChat }">
-      <aside v-show="showChat" class="chat-col">
+    <div
+      class="mt-2.5 grid items-stretch gap-3.5 max-md:grid-cols-1"
+      :class="showChat ? 'md:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)]' : 'grid-cols-1'"
+    >
+      <aside v-show="showChat" class="min-h-[520px] max-md:order-2 max-md:min-h-[360px]">
         <ChatPanel
           ref="chatPanel"
           :api="api"
           :customer-id="customerId"
+          :customers="customers"
           @status="onPanelStatus"
           @refreshed="refreshAll"
+          @stale="onChatStale"
+          @select-customer="onSelectCustomer"
           @goto-tab="(t) => (tab = t)"
           @use-reply="suggestReply"
           @use-schedule="suggestSchedule"
         />
       </aside>
 
-      <section class="side-col">
+      <section class="min-w-0 max-md:order-1">
         <CustomerHeader :context="context" :customer-id="customerId" />
 
-        <nav class="tabs">
-          <button :class="{ active: tab === 'profile' }" type="button" @click="tab = 'profile'">画像</button>
-          <button :class="{ active: tab === 'tags' }" type="button" @click="tab = 'tags'">标签</button>
-          <button :class="{ active: tab === 'suggest' }" type="button" @click="tab = 'suggest'">建议</button>
-          <button :class="{ active: tab === 'schedule' }" type="button" @click="tab = 'schedule'">日程</button>
+        <nav
+          class="mb-2.5 flex gap-0.5 rounded-panel bg-stone-100 p-0.5"
+          role="tablist"
+        >
+          <button
+            v-for="t in tabs"
+            :key="t.id"
+            type="button"
+            role="tab"
+            class="relative flex flex-1 items-center justify-center gap-1.5 rounded-control px-1.5 py-2 text-sm font-medium transition-colors"
+            :class="
+              tab === t.id
+                ? 'bg-white font-bold text-fjord shadow-soft'
+                : 'bg-transparent text-muted hover:text-ink'
+            "
+            :aria-selected="tab === t.id"
+            @click="tab = t.id"
+          >
+            <UiIcon :icon="t.icon" :size="16" />
+            {{ t.label }}
+            <span
+              v-if="aiStale"
+              class="absolute -right-0.5 -top-0.5 rounded-full bg-signal px-1 py-px text-[9px] font-semibold leading-none text-white"
+            >
+              可更新
+            </span>
+          </button>
         </nav>
 
-        <div class="side-body card">
-          <ProfilePanel
-            v-if="tab === 'profile'"
-            :profile="profile"
-            :generating="generating"
-            @generate="generate"
-            @confirm="confirm"
-            @confirm-field="confirmField"
-            @patch-field="patchField"
-          />
-          <TagsPanel
-            v-else-if="tab === 'tags'"
-            :api="api"
-            :customer-id="customerId"
-            :tags="tags"
-            :recommend-busy="tagRecommendBusy"
-            @recommend="recommendTags"
-            @status="onPanelStatus"
-            @refreshed="refreshTags"
-          />
-          <SuggestPanel
-            v-else-if="tab === 'suggest'"
-            :reply="reply"
-            :reply-scene="replyScene"
-            :reply-busy="replyBusy"
-            :last-asr="lastAsr"
-            :outcome="replyOutcome"
-            @update:reply-scene="onSceneChange"
-            @suggest="suggestReply"
-            @feedback="replyFeedback"
-            @clear-outcome="clearReplyOutcome"
-            @status="onPanelStatus"
-          />
+        <Transition
+          enter-active-class="transition-opacity duration-150"
+          leave-active-class="transition-opacity duration-150"
+          enter-from-class="opacity-0"
+          leave-to-class="opacity-0"
+          mode="out-in"
+        >
+          <div
+            v-if="tab !== 'schedule'"
+            :key="tab"
+            class="min-h-[420px] rounded-panel border border-line border-l-[3px] border-l-fjord bg-white p-3.5 shadow-soft"
+          >
+            <ProfilePanel
+              v-if="tab === 'profile'"
+              :profile="profile"
+              :generating="generating"
+              @generate="generate"
+              @confirm="confirm"
+              @confirm-field="confirmField"
+              @patch-field="patchField"
+            />
+            <TagsPanel
+              v-else-if="tab === 'tags'"
+              :api="api"
+              :customer-id="customerId"
+              :tags="tags"
+              :recommend-busy="tagRecommendBusy"
+              @recommend="recommendTags"
+              @status="onPanelStatus"
+              @refreshed="refreshTags"
+            />
+            <SuggestPanel
+              v-else-if="tab === 'suggest'"
+              :reply="reply"
+              :reply-scene="replyScene"
+              :reply-busy="replyBusy"
+              :last-asr="lastAsr"
+              :outcome="replyOutcome"
+              @update:reply-scene="onSceneChange"
+              @suggest="suggestReply"
+              @feedback="replyFeedback"
+              @clear-outcome="clearReplyOutcome"
+              @status="onPanelStatus"
+            />
+          </div>
+        </Transition>
+        <div
+          v-show="tab === 'schedule'"
+          class="min-h-[420px] rounded-panel border border-line border-l-[3px] border-l-fjord bg-white p-3.5 shadow-soft"
+        >
           <SchedulePanel
-            v-show="tab === 'schedule'"
             ref="schedulePanel"
             :api="api"
             :customer-id="customerId"
             @status="onPanelStatus"
+            @suggest-started="aiStale = false"
           />
         </div>
       </section>
     </div>
   </main>
 </template>
-
-<style scoped>
-.page {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 14px 16px 24px;
-}
-.top, .top-actions, .toolbar, .tabs {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.top { justify-content: space-between; margin-bottom: 8px; }
-h1 {
-  margin: 0;
-  font-size: 1.2rem;
-  font-family: var(--font-display);
-}
-.sub { color: var(--muted); margin: 4px 0 0; font-size: 13px; }
-.toolbar {
-  margin-bottom: 10px;
-  justify-content: space-between;
-}
-.toolbar select {
-  margin-left: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 8px;
-}
-.bench {
-  display: grid;
-  grid-template-columns: minmax(280px, 1.1fr) minmax(300px, 0.9fr);
-  gap: 12px;
-  align-items: stretch;
-}
-.bench.chat-hidden {
-  grid-template-columns: 1fr;
-}
-.chat-col { min-height: 520px; }
-.side-col { min-width: 0; }
-.card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  box-shadow: var(--shadow);
-}
-.tabs { margin-bottom: 8px; }
-.tabs button.active {
-  background: var(--ink);
-  color: #fff;
-  border-color: var(--ink);
-}
-.side-body { min-height: 420px; }
-.chat-toggle {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.demo-mode {
-  margin: 0 0 12px;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius);
-  background: #fafbfc;
-  padding: 6px 10px;
-}
-.demo-mode summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
-  user-select: none;
-}
-.demo-body {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 8px 0 4px;
-}
-
-@media (max-width: 900px) {
-  .bench {
-    grid-template-columns: 1fr;
-  }
-  .chat-col {
-    order: 2;
-    min-height: 360px;
-  }
-  .side-col { order: 1; }
-}
-</style>

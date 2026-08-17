@@ -17,66 +17,27 @@ function priorityLabel(p?: string) {
 </script>
 
 <template>
-  <div class="weak-tip" role="status">
-    <span class="label">弱提醒</span>
-    <button type="button" class="text-btn" title="查看日程" @click="emit('open')">
-      <span class="text">{{ text }}</span>
-      <span class="go">查看日程 →</span>
+  <div
+    class="mb-3 flex flex-wrap items-center gap-2 rounded-panel border border-orange-300 bg-orange-50 px-3 py-2 text-[13px]"
+    role="status"
+  >
+    <span class="rounded-control bg-orange-600 px-2 py-0.5 text-xs text-white">弱提醒</span>
+    <button
+      type="button"
+      class="flex min-w-[140px] flex-1 cursor-pointer flex-wrap items-center gap-2 border-none bg-transparent p-0 text-left"
+      title="查看日程"
+      @click="emit('open')"
+    >
+      <span class="text-orange-900">{{ text }}</span>
+      <span class="whitespace-nowrap text-xs text-fjord">查看日程 →</span>
     </button>
-    <span v-if="priority" class="prio">{{ priorityLabel(priority) }}</span>
-    <button type="button" class="close" @click="emit('dismiss')">关闭</button>
+    <span v-if="priority" class="text-xs text-orange-700">{{ priorityLabel(priority) }}</span>
+    <button
+      type="button"
+      class="cursor-pointer rounded-control border border-orange-300 bg-white px-2 py-0.5"
+      @click="emit('dismiss')"
+    >
+      关闭
+    </button>
   </div>
 </template>
-
-<style scoped>
-.weak-tip {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  background: #fff7ed;
-  border: 1px solid #fdba74;
-  border-radius: 10px;
-  padding: 8px 12px;
-  margin-bottom: 12px;
-  font-size: 13px;
-}
-.label {
-  background: #ea580c;
-  color: #fff;
-  border-radius: 6px;
-  padding: 2px 8px;
-  font-size: 12px;
-}
-.text-btn {
-  flex: 1;
-  min-width: 140px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  border: none;
-  background: transparent;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
-}
-.text { color: #9a3412; }
-.go {
-  color: var(--accent);
-  font-size: 12px;
-  white-space: nowrap;
-}
-.prio {
-  color: #c2410c;
-  font-size: 12px;
-}
-.close {
-  border: 1px solid #fdba74;
-  background: #fff;
-  border-radius: 6px;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-</style>

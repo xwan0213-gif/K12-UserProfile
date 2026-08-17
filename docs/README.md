@@ -22,4 +22,6 @@
 | [ClassDoc/32-阶段B日程写路径补齐.md](../ClassDoc/32-阶段B日程写路径补齐.md) | 阶段 B |
 | [ClassDoc/33-阶段C侧栏壳与体验收尾.md](../ClassDoc/33-阶段C侧栏壳与体验收尾.md) | 阶段 C |
 | [ClassDoc/34-阶段D管理后台产品化起步.md](../ClassDoc/34-阶段D管理后台产品化起步.md) | 阶段 D.1～D.3 |
-| [ClassDoc/35-阶段D管理后台写路径与筛选.md](../ClassDoc/35-阶段D管理后台写路径与筛选.md) | 阶段 D.4～D.6 |
+| [ClassDoc/36-模拟验收审查报告.md](../ClassDoc/36-模拟验收审查报告.md) | 模拟验收审查 |
+| [ClassDoc/37-青墨UI改版记录.md](../ClassDoc/37-青墨UI改版记录.md) | 青墨 UI 统一改版（已由 38 北欧换皮取代视觉） |
+| [ClassDoc/38-登录模拟后台北欧UI.md](../ClassDoc/38-登录模拟后台北欧UI.md) | 登录跳转 · 微信模拟 · 后台补齐 · 北欧 Tailwind |

@@ -30,58 +30,22 @@ const steps = computed(() => {
 </script>
 
 <template>
-  <div class="funnel">
-    <div v-for="s in steps" :key="s.key" class="step">
-      <div class="head">
-        <span class="title">{{ s.title }}</span>
-        <strong>{{ s.count }}</strong>
+  <div class="grid gap-3">
+    <div v-for="s in steps" :key="s.key" class="grid gap-1">
+      <div class="flex items-baseline justify-between gap-2">
+        <span class="text-sm text-ink">{{ s.title }}</span>
+        <strong class="text-base font-semibold">{{ s.count }}</strong>
       </div>
-      <div class="track" :title="s.note || s.title">
-        <div class="fill" :style="{ width: `${s.pct}%` }" />
+      <div
+        class="h-2 overflow-hidden rounded-control bg-stone-100"
+        :title="s.note || s.title"
+      >
+        <div
+          class="h-full min-w-0 rounded-control bg-fjord transition-[width]"
+          :style="{ width: `${s.pct}%` }"
+        />
       </div>
-      <p v-if="s.note" class="note">{{ s.note }}</p>
+      <p v-if="s.note" class="m-0 text-[11px] leading-snug text-muted">{{ s.note }}</p>
     </div>
   </div>
 </template>
-
-<style scoped>
-.funnel {
-  display: grid;
-  gap: 12px;
-}
-.step {
-  display: grid;
-  gap: 4px;
-}
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-}
-.title {
-  font-size: 13px;
-  color: var(--ink);
-}
-.head strong {
-  font-size: 1.05rem;
-}
-.track {
-  height: 10px;
-  background: #e8eef4;
-  border-radius: 999px;
-  overflow: hidden;
-}
-.fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), #14b8a6);
-  border-radius: 999px;
-  min-width: 0;
-}
-.note {
-  margin: 0;
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.35;
-}
-</style>

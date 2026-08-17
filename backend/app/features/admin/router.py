@@ -135,12 +135,19 @@ class UserPatch(BaseModel):
     org_id: int | None = None
     status: int | None = None
     mobile: str | None = None
+    wecom_userid: str | None = None
 
 
 class AccountCreate(BaseModel):
     """为用户创建后台登录账号请求体。"""
 
     login_name: str
+    password: str
+
+
+class AccountResetPassword(BaseModel):
+    """重置后台登录密码请求体。"""
+
     password: str
 
 
@@ -176,6 +183,15 @@ async def list_users(
     rows = (
         await db.execute(q.order_by(AppUser.id).offset((p - 1) * ps).limit(ps))
     ).scalars().all()
+    user_ids = [u.id for u in rows]
+    account_user_ids: set[int] = set()
+    if user_ids:
+        acc_rows = (
+            await db.execute(
+                select(AdminAccount.user_id).where(AdminAccount.user_id.in_(user_ids))
+            )
+        ).scalars().all()
+        account_user_ids = set(acc_rows)
     items = [
         {
             "id": u.id,
@@ -185,6 +201,7 @@ async def list_users(
             "mobile": u.mobile,
             "status": u.status,
             "wecom_userid": u.wecom_userid,
+            "has_account": u.id in account_user_ids,
         }
         for u in rows
     ]
@@ -233,6 +250,8 @@ async def patch_user(
         row.status = body.status
     if body.mobile is not None:
         row.mobile = body.mobile
+    if body.wecom_userid is not None:
+        row.wecom_userid = body.wecom_userid or None
     await db.commit()
     return ok({"id": row.id})
 
@@ -259,6 +278,24 @@ async def create_account(
     db.add(acc)
     await db.commit()
     return ok({"user_id": user_id, "login_name": body.login_name})
+
+
+@router.post("/users/{user_id}/account/reset-password")
+async def reset_account_password(
+    user_id: int, body: AccountResetPassword, user: CurrentUser, db: DbSession
+) -> dict[str, Any]:
+    """重置已有后台登录账号密码（仅 admin）。"""
+    require_roles(user, "admin")
+    if not body.password or len(body.password) < 6:
+        raise AppError(ErrorCode.PARAM, "密码至少 6 位", http_status=400)
+    acc = (
+        await db.execute(select(AdminAccount).where(AdminAccount.user_id == user_id))
+    ).scalar_one_or_none()
+    if acc is None:
+        raise AppError(ErrorCode.NOT_FOUND, "该用户尚未开通后台账号", http_status=404)
+    acc.password_hash = hash_password(body.password)
+    await db.commit()
+    return ok({"user_id": user_id, "reset": True})
 
 
 @router.delete("/users/{user_id}")

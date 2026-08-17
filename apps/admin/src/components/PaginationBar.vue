@@ -15,14 +15,27 @@ function totalPages(total: number, pageSize: number) {
 </script>
 
 <template>
-  <div v-if="total > 0" class="pager">
-    <span class="muted">共 {{ total }} 条 · 第 {{ page }} / {{ totalPages(total, pageSize) }} 页</span>
-    <div class="btns">
-      <button type="button" :disabled="page <= 1" @click="emit('update:page', page - 1)">
+  <div
+    v-if="total > 0"
+    class="mt-3 flex flex-wrap items-center justify-between gap-2"
+  >
+    <span class="text-sm text-muted">
+      共 {{ total }} 条 · 第 {{ page }} / {{ totalPages(total, pageSize) }} 页
+    </span>
+    <div class="flex gap-1.5">
+      <button
+        type="button"
+        class="rounded-control border border-line bg-white px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        aria-label="上一页"
+        :disabled="page <= 1"
+        @click="emit('update:page', page - 1)"
+      >
         上一页
       </button>
       <button
         type="button"
+        class="rounded-control border border-line bg-white px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        aria-label="下一页"
         :disabled="page >= totalPages(total, pageSize)"
         @click="emit('update:page', page + 1)"
       >
@@ -31,16 +44,3 @@ function totalPages(total: number, pageSize: number) {
     </div>
   </div>
 </template>
-
-<style scoped>
-.pager {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-}
-.btns { display: flex; gap: 6px; }
-.muted { color: var(--muted); font-size: 13px; }
-</style>

@@ -170,6 +170,19 @@ async def run_profile_pipeline(
         db.add(draft)
         await db.flush()
 
+        # 丢弃旧草稿，保证侧栏读到的是本次生成
+        old_drafts = (
+            await db.execute(
+                select(ProfileDraft).where(
+                    ProfileDraft.customer_id == customer_id,
+                    ProfileDraft.id != draft.id,
+                    ProfileDraft.status.in_(("draft", "partial_confirmed")),
+                )
+            )
+        ).scalars().all()
+        for old in old_drafts:
+            old.status = "discarded"
+
         await job_svc.mark_success(
             db, job, result_ref_type="profile_draft", result_ref_id=draft.id
         )

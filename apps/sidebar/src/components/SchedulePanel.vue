@@ -12,7 +12,7 @@ const props = defineProps<{
   customerId: number | null
 }>()
 
-const emit = defineEmits<{ status: [msg: string] }>()
+const emit = defineEmits<{ status: [msg: string]; 'suggest-started': [] }>()
 
 const items = ref<ScheduleItem[]>([])
 const drafts = ref<ScheduleDraft[]>([])
@@ -64,7 +64,9 @@ async function loadPref() {
 async function suggest() {
   if (!props.customerId) return
   busy.value = true
+  emit('suggest-started')
   emit('status', '生成日程建议…')
+  const prevIds = new Set(drafts.value.map((d) => d.suggestion_id))
   try {
     await props.api('/sidebar/schedules/suggest', {
       method: 'POST',
@@ -72,10 +74,12 @@ async function suggest() {
     })
     for (let i = 0; i < 40; i++) {
       await load()
-      if (drafts.value.length) break
+      const hasNew = drafts.value.some((d) => !prevIds.has(d.suggestion_id))
+      if (hasNew) break
       await new Promise((r) => setTimeout(r, 800))
     }
-    emit('status', drafts.value.length ? '已收到日程草稿' : '日程建议生成中，请稍后刷新')
+    const hasNew = drafts.value.some((d) => !prevIds.has(d.suggestion_id))
+    emit('status', hasNew ? '已收到日程草稿' : '日程建议生成中，请稍后刷新')
   } catch (e: any) {
     emit('status', e?.message || '日程建议失败')
   } finally {
@@ -299,17 +303,3 @@ defineExpose({ load, suggest })
     </p>
   </section>
 </template>
-
-<style scoped>
-.panel { padding: 4px 0; }
-.title-row, .filters {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.title-row { margin-bottom: 8px; }
-h2 { margin: 0; font-size: 1.05rem; }
-h3 { margin: 12px 0 6px; font-size: 0.95rem; }
-.list { list-style: none; padding: 0; margin: 0; }
-</style>

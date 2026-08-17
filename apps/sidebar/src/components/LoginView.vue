@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 
-const router = useRouter()
-const route = useRoute()
-const { login, loggedIn, routeAfterLogin, me, loadMe, redirectAdvisorAway } = useAuth()
+const emit = defineEmits<{
+  loggedIn: []
+}>()
 
-const loginName = ref('admin')
-const password = ref('admin123')
+const { login, redirectManagerToAdmin } = useAuth()
+
+const loginName = ref('advisor')
+const password = ref('advisor123')
 const error = ref('')
 const busy = ref(false)
 
@@ -17,32 +18,17 @@ async function onSubmit() {
   busy.value = true
   try {
     const user = await login(loginName.value.trim(), password.value)
-    const dest = routeAfterLogin(user)
-    if (dest === 'sidebar') return
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-    await router.replace(redirect || '/')
+    if (user.role === 'admin' || user.role === 'regional') {
+      redirectManagerToAdmin()
+      return
+    }
+    emit('loggedIn')
   } catch (e: any) {
     error.value = e?.message || '登录失败'
   } finally {
     busy.value = false
   }
 }
-
-async function boot() {
-  if (!loggedIn.value) return
-  try {
-    const u = me.value || (await loadMe())
-    if (u?.role === 'advisor') {
-      redirectAdvisorAway()
-      return
-    }
-    await router.replace('/')
-  } catch {
-    /* stay on login */
-  }
-}
-
-void boot()
 </script>
 
 <template>

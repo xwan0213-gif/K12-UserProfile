@@ -6,52 +6,41 @@ defineProps<{
 </script>
 
 <template>
-  <section v-if="context" class="head card">
-    <div class="title">
-      <strong>
+  <section
+    v-if="context"
+    class="sticky top-[72px] z-[12] mb-2.5 rounded-panel border border-line border-l-[3px] border-l-fjord bg-white p-3.5 shadow-soft max-md:static"
+  >
+    <div class="flex items-baseline justify-between gap-2">
+      <h2 class="m-0 font-display text-[1.05rem] font-bold leading-snug text-ink">
         {{ context.customer.parent_name }}
-        <span class="sep">/</span>
+        <span class="mx-0.5 font-medium text-muted">/</span>
         {{ context.customer.student_name || '—' }}
-      </strong>
-      <span class="meta">
-        {{ context.customer.grade || '—' }} · {{ context.customer.school || '—' }}
+      </h2>
+    </div>
+    <p class="mt-1 text-sm text-muted">
+      {{ context.customer.grade || '年级未知' }} · {{ context.customer.school || '学校未知' }}
+    </p>
+    <div class="mt-2 flex flex-wrap gap-1.5">
+      <span
+        v-for="t in (context.tags || []).slice(0, 5)"
+        :key="t.id"
+        class="rounded-control border border-line bg-fjord-soft px-2 py-0.5 text-xs text-fjord"
+      >
+        {{ t.name }}
       </span>
+      <span
+        v-if="(context.tags || []).length > 5"
+        class="rounded-control border border-line bg-stone-50 px-2 py-0.5 text-xs text-muted"
+      >
+        +{{ context.tags.length - 5 }}
+      </span>
+      <span v-if="!(context.tags || []).length" class="text-sm text-muted">暂无标签</span>
     </div>
-    <div class="tags">
-      <span v-for="t in (context.tags || []).slice(0, 5)" :key="t.id" class="chip">{{ t.name }}</span>
-      <span v-if="(context.tags || []).length > 5" class="chip">+{{ context.tags.length - 5 }}</span>
-      <span v-if="!(context.tags || []).length" class="muted">暂无标签</span>
-    </div>
-    <details class="more">
-      <summary>详情</summary>
-      <p class="muted">顾问：{{ context.customer.owner_name || '—' }} · customer_id={{ customerId }}</p>
+    <details class="mt-1.5">
+      <summary class="cursor-pointer text-xs text-muted">更多信息</summary>
+      <p class="mt-1 text-sm text-muted">
+        顾问 {{ context.customer.owner_name || '—' }} · 客户 #{{ customerId }}
+      </p>
     </details>
   </section>
 </template>
-
-<style scoped>
-.card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  margin-bottom: 10px;
-  box-shadow: var(--shadow);
-}
-.title {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
-}
-.sep { color: var(--muted); margin: 0 2px; }
-.meta { color: var(--muted); font-size: 13px; }
-.tags { margin-top: 8px; }
-.more { margin-top: 6px; }
-.more summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
-}
-</style>

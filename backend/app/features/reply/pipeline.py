@@ -155,6 +155,21 @@ async def run_reply_pipeline(
         db.add(suggestion)
         await db.flush()
 
+        # 作废同场景旧建议，避免 /latest 轮询误把旧话术当成「已生成完成」
+        old_rows = (
+            await db.execute(
+                select(Suggestion).where(
+                    Suggestion.customer_id == customer_id,
+                    Suggestion.type == "reply",
+                    Suggestion.scene == scene,
+                    Suggestion.id != suggestion.id,
+                    Suggestion.status.in_(("pending", "shown")),
+                )
+            )
+        ).scalars().all()
+        for old in old_rows:
+            old.status = "superseded"
+
         await job_svc.mark_success(
             db, job, result_ref_type="suggestion", result_ref_id=suggestion.id
         )

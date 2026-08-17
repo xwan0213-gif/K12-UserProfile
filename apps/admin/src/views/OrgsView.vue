@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { Pencil, Plus, Save, Trash2, X } from '@lucide/vue'
 import EmptyState from '../components/EmptyState.vue'
+import FlashBanner from '../components/FlashBanner.vue'
+import UiIcon from '../components/UiIcon.vue'
+import { useFlash } from '../composables/useFlash'
 import { useAuth } from '../composables/useAuth'
 import { canWriteOrgs } from '../nav'
 
 const { api, role } = useAuth()
+const flash = useFlash()
 const orgs = ref<any[]>([])
 const error = ref('')
 const loading = ref(true)
-const flash = ref('')
+const busy = ref(false)
+const showCreate = ref(false)
 const writable = computed(() => canWriteOrgs(role.value))
 
 const form = ref({ name: '', parent_id: '' as string | number | '', code: '' })
@@ -34,7 +40,11 @@ async function load() {
 }
 
 async function createOrg() {
-  if (!form.value.name.trim()) return
+  if (!form.value.name.trim()) {
+    flash.err('请填写组织名称')
+    return
+  }
+  busy.value = true
   try {
     await api('/admin/orgs', {
       method: 'POST',
@@ -45,10 +55,13 @@ async function createOrg() {
       }),
     })
     form.value = { name: '', parent_id: '', code: '' }
-    flash.value = '组织已创建'
+    showCreate.value = false
+    flash.ok('组织已创建')
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '创建失败'
+    flash.err(e?.message || '创建失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -63,6 +76,11 @@ function startEdit(o: any) {
 
 async function saveEdit() {
   if (editingId.value == null) return
+  if (!editForm.value.name.trim()) {
+    flash.err('请填写组织名称')
+    return
+  }
+  busy.value = true
   try {
     await api(`/admin/orgs/${editingId.value}`, {
       method: 'PATCH',
@@ -74,21 +92,27 @@ async function saveEdit() {
       }),
     })
     editingId.value = null
-    flash.value = '组织已更新'
+    flash.ok('组织已更新')
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '更新失败'
+    flash.err(e?.message || '更新失败')
+  } finally {
+    busy.value = false
   }
 }
 
-async function removeOrg(id: number) {
-  if (!window.confirm('软删除该组织？')) return
+async function removeOrg(o: any) {
+  if (!window.confirm(`确认软删除组织「${o.name}」？删除后将不在列表显示，下属员工需另行调整。`)) return
+  busy.value = true
   try {
-    await api(`/admin/orgs/${id}`, { method: 'DELETE' })
-    flash.value = '组织已删除'
+    await api(`/admin/orgs/${o.id}`, { method: 'DELETE' })
+    flash.ok('组织已删除')
+    editingId.value = null
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '删除失败'
+    flash.err(e?.message || '删除失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -98,44 +122,95 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="card">
-    <h2>组织</h2>
-    <p v-if="flash" class="muted">{{ flash }}</p>
-    <p v-if="loading" class="muted">加载中…</p>
+  <section class="rounded-panel border border-line bg-white p-5 shadow-soft">
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="font-display text-lg font-semibold">组织</h2>
+        <FlashBanner class="mt-2" :message="flash.state.message" :kind="flash.state.kind" />
+      </div>
+      <button
+        v-if="writable"
+        type="button"
+        class="inline-flex items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+        @click="showCreate = !showCreate"
+      >
+        <UiIcon :icon="showCreate ? X : Plus" :size="14" />
+        {{ showCreate ? '收起' : '新建组织' }}
+      </button>
+    </div>
+
+    <p v-if="loading" class="text-sm text-muted">加载中…</p>
     <EmptyState v-else-if="error" :title="error" />
     <template v-else>
-      <form v-if="writable" class="form" @submit.prevent="createOrg">
-        <strong>新建组织</strong>
-        <label>名称 <input v-model="form.name" required /></label>
-        <label>
+      <form
+        v-if="showCreate && writable"
+        class="mb-4 grid max-w-md gap-3 rounded-panel border border-line bg-stone-50 p-4"
+        @submit.prevent="createOrg"
+      >
+        <strong class="text-sm">新建组织</strong>
+        <label class="grid gap-1 text-sm text-muted">
+          名称
+          <input v-model="form.name" required class="rounded-control border border-line px-2.5 py-1.5 text-ink" />
+        </label>
+        <label class="grid gap-1 text-sm text-muted">
           上级
-          <select v-model="form.parent_id">
+          <select v-model="form.parent_id" class="rounded-control border border-line px-2.5 py-1.5 text-ink">
             <option value="">无</option>
             <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
           </select>
         </label>
-        <label>编码 <input v-model="form.code" placeholder="可选" /></label>
-        <button type="submit" class="primary">创建</button>
+        <label class="grid gap-1 text-sm text-muted">
+          编码
+          <input
+            v-model="form.code"
+            placeholder="可选"
+            class="rounded-control border border-line px-2.5 py-1.5 text-ink"
+          />
+        </label>
+        <button
+          type="submit"
+          :disabled="busy"
+          class="inline-flex w-fit items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          <UiIcon :icon="Plus" :size="14" />
+          {{ busy ? '创建中…' : '创建' }}
+        </button>
       </form>
-      <p v-else class="muted">区域主管可查看组织；创建/改/删仅管理员。</p>
+      <p v-else-if="!writable" class="text-sm text-muted">区域主管可查看组织；创建/编辑/删除仅管理员。</p>
 
       <EmptyState v-if="!orgs.length" title="暂无组织" />
-      <table v-else class="data">
-        <thead>
-          <tr><th>ID</th><th>名称</th><th>上级</th><th>编码</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="o in orgs" :key="o.id">
-            <td>{{ o.id }}</td>
-            <td>
-              <template v-if="editingId === o.id">
-                <input v-model="editForm.name" />
-              </template>
-              <template v-else>{{ o.name }}</template>
-            </td>
-            <td>
-              <template v-if="editingId === o.id">
-                <select v-model="editForm.parent_id">
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-line text-muted">
+            <tr>
+              <th class="pb-2 pr-3 font-medium">ID</th>
+              <th class="pb-2 pr-3 font-medium">名称</th>
+              <th class="pb-2 pr-3 font-medium">上级</th>
+              <th class="pb-2 pr-3 font-medium">编码</th>
+              <th class="pb-2 font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="o in orgs"
+              :key="o.id"
+              class="border-b border-line/60 hover:bg-fjord-soft/40"
+            >
+              <td class="py-2 pr-3">{{ o.id }}</td>
+              <td class="py-2 pr-3">
+                <input
+                  v-if="editingId === o.id"
+                  v-model="editForm.name"
+                  class="w-full rounded-control border border-line px-2 py-1 text-sm"
+                />
+                <template v-else>{{ o.name }}</template>
+              </td>
+              <td class="py-2 pr-3">
+                <select
+                  v-if="editingId === o.id"
+                  v-model="editForm.parent_id"
+                  class="rounded-control border border-line px-2 py-1 text-sm"
+                >
                   <option value="">无</option>
                   <option
                     v-for="p in orgs.filter((x) => x.id !== o.id)"
@@ -145,59 +220,66 @@ onMounted(() => {
                     {{ p.name }}
                   </option>
                 </select>
-              </template>
-              <template v-else>{{ orgName(o.parent_id) }}</template>
-            </td>
-            <td>
-              <template v-if="editingId === o.id">
-                <input v-model="editForm.code" />
-              </template>
-              <template v-else>{{ o.code || '—' }}</template>
-            </td>
-            <td class="actions">
-              <template v-if="writable && editingId === o.id">
-                <button type="button" class="primary" @click="saveEdit">保存</button>
-                <button type="button" @click="editingId = null">取消</button>
-              </template>
-              <template v-else-if="writable">
-                <button type="button" @click="startEdit(o)">改</button>
-                <button type="button" @click="removeOrg(o.id)">删</button>
-              </template>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+                <template v-else>{{ orgName(o.parent_id) }}</template>
+              </td>
+              <td class="py-2 pr-3">
+                <input
+                  v-if="editingId === o.id"
+                  v-model="editForm.code"
+                  class="w-full rounded-control border border-line px-2 py-1 text-sm"
+                />
+                <template v-else>{{ o.code || '—' }}</template>
+              </td>
+              <td class="py-2">
+                <div v-if="writable" class="flex flex-wrap gap-1.5">
+                  <template v-if="editingId === o.id">
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control bg-fjord px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                      @click="saveEdit"
+                    >
+                      <UiIcon :icon="Save" :size="14" />
+                      {{ busy ? '保存中…' : '保存' }}
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-ink hover:bg-stone-50 disabled:opacity-50"
+                      @click="editingId = null"
+                    >
+                      <UiIcon :icon="X" :size="14" />
+                      取消
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-ink hover:bg-stone-50 disabled:opacity-50"
+                      :aria-label="`编辑组织 ${o.name}`"
+                      @click="startEdit(o)"
+                    >
+                      <UiIcon :icon="Pencil" :size="14" />
+                      编辑
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-danger hover:bg-stone-50 disabled:opacity-50"
+                      :aria-label="`删除组织 ${o.name}`"
+                      @click="removeOrg(o)"
+                    >
+                      <UiIcon :icon="Trash2" :size="14" />
+                      删除
+                    </button>
+                  </template>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </template>
   </section>
 </template>
-
-<style scoped>
-h2 { margin: 0 0 10px; font-size: 1.05rem; }
-.form {
-  display: grid;
-  gap: 8px;
-  max-width: 420px;
-  margin-bottom: 14px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fafbfc;
-}
-.form label {
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--muted);
-}
-.form input,
-.form select,
-td input,
-td select {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 8px;
-  color: var(--ink);
-  width: 100%;
-}
-.actions { display: flex; gap: 6px; flex-wrap: wrap; }
-</style>

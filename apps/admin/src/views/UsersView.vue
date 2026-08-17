@@ -1,21 +1,27 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { KeyRound, Pencil, Plus, Save, Trash2, UserPlus, X } from '@lucide/vue'
 import EmptyState from '../components/EmptyState.vue'
+import FlashBanner from '../components/FlashBanner.vue'
 import PaginationBar from '../components/PaginationBar.vue'
+import UiIcon from '../components/UiIcon.vue'
+import { useFlash } from '../composables/useFlash'
 import { roleLabel, useAuth } from '../composables/useAuth'
 import { canCreateAccount, canWriteUsers } from '../nav'
 
 const { api, role, me } = useAuth()
+const flash = useFlash()
 const users = ref<any>(null)
 const orgs = ref<any[]>([])
 const error = ref('')
 const loading = ref(true)
-const flash = ref('')
+const busy = ref(false)
 const page = ref(1)
 const pageSize = 20
 const keyword = ref('')
 const filterRole = ref('')
 const filterOrg = ref('' as string | number | '')
+const showCreate = ref(false)
 
 const writable = computed(() => canWriteUsers(role.value))
 const canAccount = computed(() => canCreateAccount(role.value))
@@ -25,6 +31,7 @@ const createForm = ref({
   role: 'advisor',
   org_id: '' as string | number | '',
   mobile: '',
+  wecom_userid: '',
 })
 const editingId = ref<number | null>(null)
 const editForm = ref({
@@ -33,9 +40,14 @@ const editForm = ref({
   org_id: '' as string | number | '',
   status: 1,
   mobile: '',
+  wecom_userid: '',
 })
 const accountUserId = ref<number | null>(null)
+const accountUserName = ref('')
 const accountForm = ref({ login_name: '', password: '' })
+const resetPasswordUserId = ref<number | null>(null)
+const resetPasswordUserName = ref('')
+const resetPasswordForm = ref({ password: '' })
 
 function orgName(id?: number | null) {
   if (id == null) return '—'
@@ -85,7 +97,11 @@ async function load() {
 }
 
 async function createUser() {
-  if (!createForm.value.name.trim()) return
+  if (!createForm.value.name.trim()) {
+    flash.err('请填写姓名')
+    return
+  }
+  busy.value = true
   try {
     await api('/admin/users', {
       method: 'POST',
@@ -94,17 +110,29 @@ async function createUser() {
         role: createForm.value.role,
         org_id: createForm.value.org_id === '' ? null : Number(createForm.value.org_id),
         mobile: createForm.value.mobile.trim() || null,
+        wecom_userid: createForm.value.wecom_userid.trim() || null,
       }),
     })
-    createForm.value = { name: '', role: 'advisor', org_id: me.value?.org_id ?? '', mobile: '' }
-    flash.value = '员工已创建'
+    createForm.value = {
+      name: '',
+      role: 'advisor',
+      org_id: me.value?.org_id ?? '',
+      mobile: '',
+      wecom_userid: '',
+    }
+    showCreate.value = false
+    flash.ok('员工已创建')
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '创建失败'
+    flash.err(e?.message || '创建失败')
+  } finally {
+    busy.value = false
   }
 }
 
 function startEdit(u: any) {
+  accountUserId.value = null
+  resetPasswordUserId.value = null
   editingId.value = u.id
   editForm.value = {
     name: u.name || '',
@@ -112,11 +140,21 @@ function startEdit(u: any) {
     org_id: u.org_id ?? '',
     status: u.status ?? 1,
     mobile: u.mobile || '',
+    wecom_userid: u.wecom_userid || '',
   }
+}
+
+function cancelEdit() {
+  editingId.value = null
 }
 
 async function saveEdit() {
   if (editingId.value == null) return
+  if (!editForm.value.name.trim()) {
+    flash.err('请填写姓名')
+    return
+  }
+  busy.value = true
   try {
     await api(`/admin/users/${editingId.value}`, {
       method: 'PATCH',
@@ -126,44 +164,108 @@ async function saveEdit() {
         org_id: editForm.value.org_id === '' ? null : Number(editForm.value.org_id),
         status: Number(editForm.value.status),
         mobile: editForm.value.mobile.trim() || null,
+        wecom_userid: editForm.value.wecom_userid.trim() || null,
       }),
     })
     editingId.value = null
-    flash.value = '员工已更新'
+    flash.ok('员工已更新')
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '更新失败'
+    flash.err(e?.message || '更新失败')
+  } finally {
+    busy.value = false
   }
 }
 
-function openAccount(userId: number) {
-  accountUserId.value = userId
+function openAccount(u: any) {
+  editingId.value = null
+  resetPasswordUserId.value = null
+  accountUserId.value = u.id
+  accountUserName.value = u.name || ''
   accountForm.value = { login_name: '', password: '' }
+}
+
+function openResetPassword(u: any) {
+  editingId.value = null
+  accountUserId.value = null
+  resetPasswordUserId.value = u.id
+  resetPasswordUserName.value = u.name || ''
+  resetPasswordForm.value = { password: '' }
 }
 
 async function createAccount() {
   if (accountUserId.value == null) return
+  if (!accountForm.value.login_name.trim()) {
+    flash.err('请填写登录名')
+    return
+  }
+  if (!accountForm.value.password) {
+    flash.err('请填写密码')
+    return
+  }
+  if (accountForm.value.password.length < 6) {
+    flash.err('密码至少 6 位')
+    return
+  }
+  busy.value = true
   try {
     await api(`/admin/users/${accountUserId.value}/account`, {
       method: 'POST',
       body: JSON.stringify(accountForm.value),
     })
-    flash.value = `已开通账号 ${accountForm.value.login_name}`
+    flash.ok(`已为 ${accountUserName.value} 开通账号 ${accountForm.value.login_name}`)
     accountUserId.value = null
+    accountUserName.value = ''
+    await load()
   } catch (e: any) {
-    flash.value = e?.message || '开账号失败'
+    flash.err(e?.message || '开账号失败')
+  } finally {
+    busy.value = false
   }
 }
 
-async function removeUser(id: number) {
-  if (!window.confirm('软删除该员工？删除后将无法登录且不在列表显示。')) return
+async function resetPassword() {
+  if (resetPasswordUserId.value == null) return
+  if (!resetPasswordForm.value.password) {
+    flash.err('请填写新密码')
+    return
+  }
+  if (resetPasswordForm.value.password.length < 6) {
+    flash.err('密码至少 6 位')
+    return
+  }
+  busy.value = true
   try {
-    await api(`/admin/users/${id}`, { method: 'DELETE' })
-    flash.value = '员工已删除'
-    editingId.value = null
+    await api(`/admin/users/${resetPasswordUserId.value}/account/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ password: resetPasswordForm.value.password }),
+    })
+    flash.ok(`已重置 ${resetPasswordUserName.value} 的密码`)
+    resetPasswordUserId.value = null
+    resetPasswordUserName.value = ''
+    resetPasswordForm.value = { password: '' }
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '删除失败'
+    flash.err(e?.message || '重置密码失败')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function removeUser(u: any) {
+  if (!window.confirm(`确认软删除员工「${u.name}」？删除后将无法登录且不在列表显示。`)) return
+  busy.value = true
+  try {
+    await api(`/admin/users/${u.id}`, { method: 'DELETE' })
+    flash.ok('员工已删除')
+    editingId.value = null
+    accountUserId.value = null
+    resetPasswordUserId.value = null
+    await load()
+  } catch (e: any) {
+    flash.err(e?.message || '删除失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -183,97 +285,323 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="card">
-    <h2>员工</h2>
-    <p v-if="flash" class="muted">{{ flash }}</p>
+  <section class="rounded-panel border border-line bg-white p-5 shadow-soft">
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="font-display text-lg font-semibold">员工</h2>
+        <FlashBanner class="mt-2" :message="flash.state.message" :kind="flash.state.kind" />
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <form class="flex flex-wrap items-center gap-2" @submit.prevent="onSearch">
+          <input
+            v-model="keyword"
+            placeholder="姓名/手机…"
+            class="rounded-control border border-line px-2.5 py-1.5 text-sm"
+          />
+          <select v-model="filterRole" class="rounded-control border border-line px-2.5 py-1.5 text-sm">
+            <option value="">全部角色</option>
+            <option value="admin">管理员</option>
+            <option value="regional">区域主管</option>
+            <option value="advisor">顾问</option>
+          </select>
+          <select v-model="filterOrg" class="rounded-control border border-line px-2.5 py-1.5 text-sm">
+            <option value="">全部组织</option>
+            <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
+          </select>
+          <button
+            type="submit"
+            class="rounded-control border border-line bg-white px-3 py-1.5 text-sm text-ink hover:bg-stone-50 disabled:opacity-50"
+          >
+            筛选
+          </button>
+        </form>
+        <button
+          v-if="writable"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+          @click="showCreate = !showCreate"
+        >
+          <UiIcon :icon="showCreate ? X : Plus" :size="14" />
+          {{ showCreate ? '收起' : '新建员工' }}
+        </button>
+      </div>
+    </div>
 
-    <form class="filters" @submit.prevent="onSearch">
-      <input v-model="keyword" placeholder="姓名/手机…" />
-      <select v-model="filterRole">
-        <option value="">全部角色</option>
-        <option value="admin">管理员</option>
-        <option value="regional">区域主管</option>
-        <option value="advisor">顾问</option>
-      </select>
-      <select v-model="filterOrg">
-        <option value="">全部组织</option>
-        <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
-      </select>
-      <button type="submit" class="primary">筛选</button>
-    </form>
-
-    <form v-if="writable" class="form" @submit.prevent="createUser">
-      <strong>新建员工</strong>
-      <label>姓名 <input v-model="createForm.name" required /></label>
-      <label>
+    <form
+      v-if="showCreate && writable"
+      class="mb-4 grid max-w-md gap-3 rounded-panel border border-line bg-stone-50 p-4"
+      @submit.prevent="createUser"
+    >
+      <strong class="text-sm">新建员工</strong>
+      <label class="grid gap-1 text-sm text-muted">
+        姓名
+        <input v-model="createForm.name" required class="rounded-control border border-line px-2.5 py-1.5 text-ink" />
+      </label>
+      <label class="grid gap-1 text-sm text-muted">
         角色
-        <select v-model="createForm.role">
+        <select v-model="createForm.role" class="rounded-control border border-line px-2.5 py-1.5 text-ink">
           <option v-for="r in roleOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
         </select>
       </label>
-      <label>
+      <label class="grid gap-1 text-sm text-muted">
         组织
-        <select v-model="createForm.org_id">
+        <select v-model="createForm.org_id" class="rounded-control border border-line px-2.5 py-1.5 text-ink">
           <option value="">默认</option>
           <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
         </select>
       </label>
-      <label>手机 <input v-model="createForm.mobile" /></label>
-      <button type="submit" class="primary">创建</button>
+      <label class="grid gap-1 text-sm text-muted">
+        手机
+        <input v-model="createForm.mobile" class="rounded-control border border-line px-2.5 py-1.5 text-ink" />
+      </label>
+      <label class="grid gap-1 text-sm text-muted">
+        企微 userid
+        <input
+          v-model="createForm.wecom_userid"
+          placeholder="可选"
+          class="rounded-control border border-line px-2.5 py-1.5 text-ink"
+        />
+      </label>
+      <button
+        type="submit"
+        :disabled="busy"
+        class="inline-flex w-fit items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+      >
+        <UiIcon :icon="Plus" :size="14" />
+        {{ busy ? '创建中…' : '创建' }}
+      </button>
     </form>
 
-    <p v-if="loading" class="muted">加载中…</p>
+    <p v-if="loading" class="mt-4 text-sm text-muted">加载中…</p>
     <EmptyState v-else-if="error" :title="error" />
     <EmptyState v-else-if="!(users?.items || []).length" title="暂无员工" />
     <template v-else>
-      <table class="data">
-        <thead>
-          <tr><th>姓名</th><th>角色</th><th>组织</th><th>手机</th><th>状态</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="u in users.items" :key="u.id">
-            <td>
-              <input v-if="editingId === u.id" v-model="editForm.name" />
-              <template v-else>{{ u.name }}</template>
-            </td>
-            <td>
-              <select v-if="editingId === u.id" v-model="editForm.role">
-                <option v-for="r in roleOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
-              </select>
-              <template v-else>{{ roleLabel(u.role) }}</template>
-            </td>
-            <td>
-              <select v-if="editingId === u.id" v-model="editForm.org_id">
-                <option value="">—</option>
-                <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
-              </select>
-              <template v-else>{{ orgName(u.org_id) }}</template>
-            </td>
-            <td>
-              <input v-if="editingId === u.id" v-model="editForm.mobile" />
-              <template v-else>{{ u.mobile || '—' }}</template>
-            </td>
-            <td>
-              <select v-if="editingId === u.id" v-model.number="editForm.status">
-                <option :value="1">启用</option>
-                <option :value="0">停用</option>
-              </select>
-              <template v-else>{{ u.status === 1 ? '启用' : '停用' }}</template>
-            </td>
-            <td class="actions">
-              <template v-if="writable && editingId === u.id">
-                <button type="button" class="primary" @click="saveEdit">保存</button>
-                <button type="button" @click="editingId = null">取消</button>
-              </template>
-              <template v-else>
-                <button v-if="writable" type="button" @click="startEdit(u)">改</button>
-                <button v-if="canAccount" type="button" @click="openAccount(u.id)">开账号</button>
-                <button v-if="writable" type="button" @click="removeUser(u.id)">删</button>
-              </template>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-line text-muted">
+            <tr>
+              <th class="pb-2 pr-3 font-medium">姓名</th>
+              <th class="pb-2 pr-3 font-medium">角色</th>
+              <th class="pb-2 pr-3 font-medium">组织</th>
+              <th class="pb-2 pr-3 font-medium">手机</th>
+              <th class="pb-2 pr-3 font-medium">企微 userid</th>
+              <th class="pb-2 pr-3 font-medium">后台账号</th>
+              <th class="pb-2 pr-3 font-medium">状态</th>
+              <th class="pb-2 font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="u in users.items"
+              :key="u.id"
+              class="border-b border-line/60 hover:bg-fjord-soft/40"
+            >
+              <td class="py-2 pr-3">
+                <input
+                  v-if="editingId === u.id"
+                  v-model="editForm.name"
+                  class="w-full rounded-control border border-line px-2 py-1 text-sm"
+                />
+                <template v-else>{{ u.name }}</template>
+              </td>
+              <td class="py-2 pr-3">
+                <select
+                  v-if="editingId === u.id"
+                  v-model="editForm.role"
+                  class="rounded-control border border-line px-2 py-1 text-sm"
+                >
+                  <option v-for="r in roleOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
+                </select>
+                <template v-else>{{ roleLabel(u.role) }}</template>
+              </td>
+              <td class="py-2 pr-3">
+                <select
+                  v-if="editingId === u.id"
+                  v-model="editForm.org_id"
+                  class="rounded-control border border-line px-2 py-1 text-sm"
+                >
+                  <option value="">—</option>
+                  <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
+                </select>
+                <template v-else>{{ orgName(u.org_id) }}</template>
+              </td>
+              <td class="py-2 pr-3">
+                <input
+                  v-if="editingId === u.id"
+                  v-model="editForm.mobile"
+                  class="w-full rounded-control border border-line px-2 py-1 text-sm"
+                />
+                <template v-else>{{ u.mobile || '—' }}</template>
+              </td>
+              <td class="py-2 pr-3">
+                <input
+                  v-if="editingId === u.id"
+                  v-model="editForm.wecom_userid"
+                  class="w-full rounded-control border border-line px-2 py-1 text-sm"
+                />
+                <template v-else>{{ u.wecom_userid || '—' }}</template>
+              </td>
+              <td class="py-2 pr-3">{{ u.has_account ? '已开通' : '未开通' }}</td>
+              <td class="py-2 pr-3">
+                <select
+                  v-if="editingId === u.id"
+                  v-model.number="editForm.status"
+                  class="rounded-control border border-line px-2 py-1 text-sm"
+                >
+                  <option :value="1">启用</option>
+                  <option :value="0">停用</option>
+                </select>
+                <template v-else>{{ u.status === 1 ? '启用' : '停用' }}</template>
+              </td>
+              <td class="py-2">
+                <div class="flex flex-wrap gap-1.5">
+                  <template v-if="writable && editingId === u.id">
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control bg-fjord px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                      @click="saveEdit"
+                    >
+                      <UiIcon :icon="Save" :size="14" />
+                      {{ busy ? '保存中…' : '保存' }}
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-ink hover:bg-stone-50 disabled:opacity-50"
+                      @click="cancelEdit"
+                    >
+                      <UiIcon :icon="X" :size="14" />
+                      取消
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button
+                      v-if="writable"
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-ink hover:bg-stone-50 disabled:opacity-50"
+                      :aria-label="`编辑员工 ${u.name}`"
+                      @click="startEdit(u)"
+                    >
+                      <UiIcon :icon="Pencil" :size="14" />
+                      编辑
+                    </button>
+                    <button
+                      v-if="canAccount && !u.has_account"
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-ink hover:bg-stone-50 disabled:opacity-50"
+                      :aria-label="`为 ${u.name} 开通账号`"
+                      @click="openAccount(u)"
+                    >
+                      <UiIcon :icon="UserPlus" :size="14" />
+                      开账号
+                    </button>
+                    <button
+                      v-if="canAccount && u.has_account"
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-ink hover:bg-stone-50 disabled:opacity-50"
+                      :aria-label="`重置 ${u.name} 的密码`"
+                      @click="openResetPassword(u)"
+                    >
+                      <UiIcon :icon="KeyRound" :size="14" />
+                      重置密码
+                    </button>
+                    <button
+                      v-if="writable"
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-danger hover:bg-stone-50 disabled:opacity-50"
+                      :aria-label="`删除员工 ${u.name}`"
+                      @click="removeUser(u)"
+                    >
+                      <UiIcon :icon="Trash2" :size="14" />
+                      删除
+                    </button>
+                  </template>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div
+        v-if="accountUserId != null"
+        class="mt-4 grid max-w-md gap-3 rounded-panel border border-line bg-stone-50 p-4"
+      >
+        <strong class="text-sm">开通后台账号 · {{ accountUserName }}</strong>
+        <label class="grid gap-1 text-sm text-muted">
+          登录名
+          <input v-model="accountForm.login_name" class="rounded-control border border-line px-2.5 py-1.5 text-ink" />
+        </label>
+        <label class="grid gap-1 text-sm text-muted">
+          密码
+          <input
+            v-model="accountForm.password"
+            type="password"
+            class="rounded-control border border-line px-2.5 py-1.5 text-ink"
+          />
+        </label>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            :disabled="busy"
+            class="inline-flex items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+            @click="createAccount"
+          >
+            <UiIcon :icon="UserPlus" :size="14" />
+            {{ busy ? '开通中…' : '开通' }}
+          </button>
+          <button
+            type="button"
+            :disabled="busy"
+            class="inline-flex items-center gap-1.5 rounded-control border border-line bg-white px-3 py-1.5 text-sm text-ink hover:bg-stone-50 disabled:opacity-50"
+            @click="accountUserId = null"
+          >
+            <UiIcon :icon="X" :size="14" />
+            取消
+          </button>
+        </div>
+      </div>
+
+      <div
+        v-if="resetPasswordUserId != null"
+        class="mt-4 grid max-w-md gap-3 rounded-panel border border-line bg-stone-50 p-4"
+      >
+        <strong class="text-sm">重置密码 · {{ resetPasswordUserName }}</strong>
+        <label class="grid gap-1 text-sm text-muted">
+          新密码
+          <input
+            v-model="resetPasswordForm.password"
+            type="password"
+            class="rounded-control border border-line px-2.5 py-1.5 text-ink"
+          />
+        </label>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            :disabled="busy"
+            class="inline-flex items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+            @click="resetPassword"
+          >
+            <UiIcon :icon="KeyRound" :size="14" />
+            {{ busy ? '重置中…' : '重置' }}
+          </button>
+          <button
+            type="button"
+            :disabled="busy"
+            class="inline-flex items-center gap-1.5 rounded-control border border-line bg-white px-3 py-1.5 text-sm text-ink hover:bg-stone-50 disabled:opacity-50"
+            @click="resetPasswordUserId = null"
+          >
+            <UiIcon :icon="X" :size="14" />
+            取消
+          </button>
+        </div>
+      </div>
+
       <PaginationBar
         :page="page"
         :page-size="pageSize"
@@ -281,55 +609,5 @@ onMounted(async () => {
         @update:page="(n) => (page = n)"
       />
     </template>
-
-    <div v-if="accountUserId != null" class="account card-inner">
-      <strong>开通后台账号 · 用户 #{{ accountUserId }}</strong>
-      <label>登录名 <input v-model="accountForm.login_name" /></label>
-      <label>密码 <input v-model="accountForm.password" type="password" /></label>
-      <div class="actions">
-        <button type="button" class="primary" @click="createAccount">开通</button>
-        <button type="button" @click="accountUserId = null">取消</button>
-      </div>
-    </div>
   </section>
 </template>
-
-<style scoped>
-h2 { margin: 0 0 10px; font-size: 1.05rem; }
-.filters {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.filters input,
-.filters select,
-.form input,
-.form select,
-.account input,
-td input,
-td select {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 8px;
-  color: var(--ink);
-}
-.form, .account {
-  display: grid;
-  gap: 8px;
-  max-width: 480px;
-  margin-bottom: 14px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fafbfc;
-}
-.form label, .account label {
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--muted);
-}
-.actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.card-inner { margin-top: 12px; }
-</style>

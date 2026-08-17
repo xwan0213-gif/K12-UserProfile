@@ -12,48 +12,26 @@ defineProps<{
 </script>
 
 <template>
-  <div class="cap">
-    <span class="brand">擎天学智</span>
-    <span class="pill" :class="flags.mockWecom ? 'on' : 'off'">
-      企微 {{ flags.mockWecom ? 'Mock' : '实连' }}
-    </span>
-    <span class="pill">
-      LLM {{ flags.mockLlm ? 'Fake' : (flags.llmProvider || 'cloud') }}
-    </span>
-    <span class="pill">ASR {{ flags.asr || 'Fake' }}</span>
+  <div
+    class="mb-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-control bg-stone-100 px-2.5 py-1.5 text-xs text-muted"
+    title="当前能力与降级说明（诚实展示）"
+  >
     <span
-      class="pill"
-      :class="flags.calendar === '可同步' ? 'on' : 'warn'"
+      class="h-[7px] w-[7px] shrink-0 rounded-full"
+      :class="flags.mockWecom ? 'bg-fjord' : 'bg-green-600'"
+      :title="flags.mockWecom ? '企微 Mock' : '企微实连'"
+    />
+    <span>企微 {{ flags.mockWecom ? 'Mock' : '实连' }}</span>
+    <span class="opacity-45">·</span>
+    <span>LLM {{ flags.mockLlm ? 'Fake' : (flags.llmProvider || 'cloud') }}</span>
+    <span class="opacity-45">·</span>
+    <span>ASR {{ flags.asr || 'Fake' }}</span>
+    <span class="opacity-45">·</span>
+    <span
+      :class="flags.calendar !== '可同步' ? 'text-signal' : ''"
       :title="flags.calendarHint || ''"
     >
       日历 {{ flags.calendar || '降级' }}
     </span>
   </div>
 </template>
-
-<style scoped>
-.cap {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 10px;
-}
-.brand {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 15px;
-  margin-right: 4px;
-  color: var(--ink);
-}
-.pill {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: #e8eef4;
-  color: var(--muted);
-}
-.pill.on { background: var(--accent-soft); color: var(--accent); }
-.pill.warn { background: var(--warn-soft); color: var(--warn); }
-.pill.off { background: #e8eef4; color: var(--muted); }
-</style>

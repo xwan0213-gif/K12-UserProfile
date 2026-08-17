@@ -1,20 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ArrowLeft, Save, Trash2, X } from '@lucide/vue'
 import EmptyState from '../components/EmptyState.vue'
+import FlashBanner from '../components/FlashBanner.vue'
+import UiIcon from '../components/UiIcon.vue'
+import { useFlash } from '../composables/useFlash'
 import { useAuth } from '../composables/useAuth'
 import { canWriteCustomers } from '../nav'
 
 const route = useRoute()
 const router = useRouter()
 const { api, role } = useAuth()
+const flash = useFlash()
 
 const detail = ref<any>(null)
 const users = ref<any[]>([])
 const orgs = ref<any[]>([])
 const error = ref('')
-const flash = ref('')
 const loading = ref(true)
+const busy = ref(false)
 const editing = ref(false)
 const writable = computed(() => canWriteCustomers(role.value))
 
@@ -102,6 +107,11 @@ function syncEditForm() {
   csText.value = detail.value?.cs_summary?.summary_text || ''
 }
 
+function cancelEdit() {
+  syncEditForm()
+  editing.value = false
+}
+
 async function loadMeta() {
   if (role.value === 'advisor') return
   try {
@@ -135,6 +145,11 @@ async function load() {
 }
 
 async function saveCustomer() {
+  if (!editForm.value.parent_name.trim()) {
+    flash.err('请填写家长姓名')
+    return
+  }
+  busy.value = true
   try {
     await api(`/admin/customers/${customerId.value}`, {
       method: 'PATCH',
@@ -152,34 +167,43 @@ async function saveCustomer() {
         remark: editForm.value.remark.trim() || null,
       }),
     })
-    flash.value = '客户资料已保存'
+    flash.ok('客户资料已保存')
     editing.value = false
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '保存失败'
+    flash.err(e?.message || '保存失败')
+  } finally {
+    busy.value = false
   }
 }
 
 async function saveCsSummary() {
+  busy.value = true
   try {
     await api(`/admin/customers/${customerId.value}/cs-summary`, {
       method: 'PUT',
       body: JSON.stringify({ summary_text: csText.value }),
     })
-    flash.value = '客服摘要已保存'
+    flash.ok('客服摘要已保存')
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '摘要保存失败'
+    flash.err(e?.message || '摘要保存失败')
+  } finally {
+    busy.value = false
   }
 }
 
 async function removeCustomer() {
-  if (!window.confirm('确认软删除该客户？删除后列表将不再显示。')) return
+  const name = detail.value?.customer?.parent_name || '该客户'
+  if (!window.confirm(`确认软删除客户「${name}」？删除后列表将不再显示。`)) return
+  busy.value = true
   try {
     await api(`/admin/customers/${customerId.value}`, { method: 'DELETE' })
     void router.push({ name: 'customers' })
   } catch (e: any) {
-    flash.value = e?.message || '删除失败'
+    flash.err(e?.message || '删除失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -195,145 +219,244 @@ onMounted(async () => {
 
 <template>
   <div>
-    <button type="button" class="ghost back" @click="router.push({ name: 'customers' })">
-      ← 返回客户列表
+    <button
+      type="button"
+      class="mb-3 inline-flex items-center gap-1.5 rounded-control border border-line bg-white px-3 py-1.5 text-sm text-muted hover:bg-stone-50"
+      @click="router.push({ name: 'customers' })"
+    >
+      <UiIcon :icon="ArrowLeft" :size="16" />
+      返回客户列表
     </button>
 
-    <p v-if="loading" class="muted">加载中…</p>
+    <p v-if="loading" class="text-sm text-muted">加载中…</p>
     <EmptyState v-else-if="error" :title="error" hint="无权限或不在数据范围内。" />
 
     <template v-else-if="detail">
-      <header class="hero card">
+      <header
+        class="mb-3 flex flex-wrap items-start justify-between gap-3 rounded-panel border border-line bg-white p-5 shadow-soft"
+      >
         <div>
-          <h2>
+          <h2 class="font-display text-lg font-semibold">
             {{ detail.customer.parent_name }}
-            <span class="muted">/</span>
+            <span class="font-normal text-muted">/</span>
             {{ detail.customer.student_name || '—' }}
           </h2>
-          <p class="muted meta">
-            #{{ detail.customer.id }}
-            · {{ detail.customer.grade || '年级未知' }}
+          <p class="mt-1.5 text-sm text-muted">
+            {{ detail.customer.grade || '年级未知' }}
             · {{ detail.customer.school || '学校未知' }}
             · 负责人 {{ detail.customer.owner_name || '—' }}
           </p>
-          <p v-if="flash" class="muted">{{ flash }}</p>
+          <FlashBanner class="mt-2" :message="flash.state.message" :kind="flash.state.kind" />
         </div>
-        <div v-if="writable" class="hero-actions">
-          <button type="button" @click="editing = !editing">
-            {{ editing ? '取消编辑' : '编辑资料' }}
+        <div v-if="writable" class="flex flex-wrap gap-2">
+          <button
+            v-if="!editing"
+            type="button"
+            :disabled="busy"
+            class="rounded-control border border-line bg-white px-3 py-1.5 text-sm text-ink hover:bg-stone-50 disabled:opacity-50"
+            @click="editing = true"
+          >
+            编辑资料
           </button>
-          <button type="button" @click="removeCustomer">删除客户</button>
+          <button
+            v-else
+            type="button"
+            :disabled="busy"
+            class="inline-flex items-center gap-1.5 rounded-control border border-line bg-white px-3 py-1.5 text-sm text-ink hover:bg-stone-50 disabled:opacity-50"
+            @click="cancelEdit"
+          >
+            <UiIcon :icon="X" :size="14" />
+            取消编辑
+          </button>
+          <button
+            type="button"
+            :disabled="busy"
+            class="inline-flex items-center gap-1.5 rounded-control border border-line bg-white px-3 py-1.5 text-sm text-danger hover:bg-stone-50 disabled:opacity-50"
+            @click="removeCustomer"
+          >
+            <UiIcon :icon="Trash2" :size="14" />
+            {{ busy ? '删除中…' : '删除客户' }}
+          </button>
         </div>
       </header>
 
-      <form v-if="editing && writable" class="card form" @submit.prevent="saveCustomer">
-        <strong>编辑客户资料</strong>
-        <label>家长 <input v-model="editForm.parent_name" required /></label>
-        <label>学员 <input v-model="editForm.student_name" /></label>
-        <label>年级 <input v-model="editForm.grade" /></label>
-        <label>学校 <input v-model="editForm.school" /></label>
-        <label>
+      <form
+        v-if="editing && writable"
+        class="mb-3 grid max-w-lg gap-3 rounded-panel border border-line bg-stone-50 p-4"
+        @submit.prevent="saveCustomer"
+      >
+        <strong class="text-sm">编辑客户资料</strong>
+        <label class="grid gap-1 text-sm text-muted">
+          家长
+          <input v-model="editForm.parent_name" required class="rounded-control border border-line px-2.5 py-1.5 text-ink" />
+        </label>
+        <label class="grid gap-1 text-sm text-muted">
+          学员
+          <input v-model="editForm.student_name" class="rounded-control border border-line px-2.5 py-1.5 text-ink" />
+        </label>
+        <label class="grid gap-1 text-sm text-muted">
+          年级
+          <input v-model="editForm.grade" class="rounded-control border border-line px-2.5 py-1.5 text-ink" />
+        </label>
+        <label class="grid gap-1 text-sm text-muted">
+          学校
+          <input v-model="editForm.school" class="rounded-control border border-line px-2.5 py-1.5 text-ink" />
+        </label>
+        <label class="grid gap-1 text-sm text-muted">
           学段
-          <select v-model="editForm.stage">
+          <select v-model="editForm.stage" class="rounded-control border border-line px-2.5 py-1.5 text-ink">
             <option value="">—</option>
             <option value="primary">小学</option>
             <option value="junior">初中</option>
             <option value="senior">高中</option>
           </select>
         </label>
-        <label v-if="role !== 'advisor'">
+        <label v-if="role !== 'advisor'" class="grid gap-1 text-sm text-muted">
           负责人
-          <select v-model="editForm.owner_user_id">
+          <select v-model="editForm.owner_user_id" class="rounded-control border border-line px-2.5 py-1.5 text-ink">
             <option value="">—</option>
             <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
           </select>
         </label>
-        <label v-if="role === 'admin'">
+        <label v-if="role === 'admin'" class="grid gap-1 text-sm text-muted">
           组织
-          <select v-model="editForm.org_id">
+          <select v-model="editForm.org_id" class="rounded-control border border-line px-2.5 py-1.5 text-ink">
             <option value="">—</option>
             <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
           </select>
         </label>
-        <label>备注 <textarea v-model="editForm.remark" rows="2" /></label>
-        <button type="submit" class="primary">保存资料</button>
+        <label class="grid gap-1 text-sm text-muted">
+          备注
+          <textarea
+            v-model="editForm.remark"
+            rows="2"
+            class="rounded-control border border-line px-2.5 py-1.5 text-ink"
+          />
+        </label>
+        <button
+          type="submit"
+          :disabled="busy"
+          class="inline-flex w-fit items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          <UiIcon :icon="Save" :size="14" />
+          {{ busy ? '保存中…' : '保存资料' }}
+        </button>
       </form>
 
-      <div class="split">
-        <aside class="col card">
-          <h3>画像</h3>
-          <p class="sec-label">已确认</p>
+      <div class="grid items-start gap-3 lg:grid-cols-[0.9fr_1.1fr]">
+        <aside class="rounded-panel border border-line border-l-4 border-l-fjord bg-white p-5 shadow-soft">
+          <h3 class="mb-3 font-display text-base font-semibold">画像</h3>
+          <p class="mb-2 text-xs font-semibold text-muted">已确认</p>
           <div v-if="confirmedBlocks.length">
-            <div v-for="b in confirmedBlocks" :key="'c-' + b.key" class="block">
-              <strong>{{ b.title }}</strong>
-              <div v-for="row in b.rows" :key="row.k" class="row">
-                <span class="k">{{ row.k }}</span>
-                <span class="v">{{ row.v }}</span>
+            <div v-for="b in confirmedBlocks" :key="'c-' + b.key" class="mb-2.5">
+              <strong class="text-sm">{{ b.title }}</strong>
+              <div v-for="row in b.rows" :key="row.k" class="mt-0.5 flex gap-2 text-sm">
+                <span class="min-w-16 shrink-0 text-muted">{{ row.k }}</span>
+                <span class="break-words">{{ row.v }}</span>
               </div>
             </div>
           </div>
           <EmptyState v-else title="尚无已确认画像" hint="顾问在侧栏确认后会出现在这里。" />
 
-          <p class="sec-label">草稿</p>
+          <p class="mb-2 mt-4 text-xs font-semibold text-muted">草稿</p>
           <div v-if="draftBlocks.length">
-            <div v-for="b in draftBlocks" :key="'d-' + b.key" class="block draft">
-              <strong>{{ b.title }}</strong>
-              <div v-for="row in b.rows" :key="row.k" class="row">
-                <span class="k">{{ row.k }}</span>
-                <span class="v">{{ row.v }}</span>
+            <div
+              v-for="b in draftBlocks"
+              :key="'d-' + b.key"
+              class="mb-2.5 rounded-panel bg-fjord-soft/50 p-2"
+            >
+              <strong class="text-sm">{{ b.title }}</strong>
+              <div v-for="row in b.rows" :key="row.k" class="mt-0.5 flex gap-2 text-sm">
+                <span class="min-w-16 shrink-0 text-muted">{{ row.k }}</span>
+                <span class="break-words">{{ row.v }}</span>
               </div>
             </div>
           </div>
           <EmptyState v-else title="无进行中草稿" />
         </aside>
 
-        <section class="col card">
-          <h3>沟通与经营</h3>
+        <section class="rounded-panel border border-line bg-white p-5 shadow-soft">
+          <h3 class="mb-3 font-display text-base font-semibold">沟通与经营</h3>
 
-          <p class="sec-label">客服摘要</p>
+          <p class="mb-2 text-xs font-semibold text-muted">客服摘要</p>
           <template v-if="writable">
-            <textarea v-model="csText" rows="4" class="cs" placeholder="填写售后/跟进摘要…" />
-            <button type="button" class="primary cs-btn" @click="saveCsSummary">保存摘要</button>
+            <textarea
+              v-model="csText"
+              rows="4"
+              placeholder="填写售后/跟进摘要…"
+              class="w-full rounded-control border border-line px-2.5 py-1.5 text-ink"
+            />
+            <button
+              type="button"
+              :disabled="busy"
+              class="mt-2 inline-flex items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+              @click="saveCsSummary"
+            >
+              <UiIcon :icon="Save" :size="14" />
+              {{ busy ? '保存中…' : '保存摘要' }}
+            </button>
           </template>
-          <p v-else-if="detail.cs_summary?.summary_text" class="summary">
+          <p v-else-if="detail.cs_summary?.summary_text" class="whitespace-pre-wrap text-sm leading-relaxed">
             {{ detail.cs_summary.summary_text }}
           </p>
           <EmptyState v-else title="暂无客服摘要" />
 
-          <p class="sec-label">标签</p>
-          <div v-if="(detail.tags || []).length" class="chips">
-            <span v-for="t in detail.tags" :key="t.customer_tag_id || t.id" class="chip">
+          <p class="mb-2 mt-4 text-xs font-semibold text-muted">标签</p>
+          <div v-if="(detail.tags || []).length" class="flex flex-wrap gap-1.5">
+            <span
+              v-for="t in detail.tags"
+              :key="t.customer_tag_id || t.id"
+              class="rounded-control bg-fjord-soft px-2 py-0.5 text-xs text-fjord"
+            >
               {{ t.name }}
             </span>
           </div>
           <EmptyState v-else title="暂无标签" hint="标签挂载请在侧栏操作。" />
 
-          <p class="sec-label">订单</p>
-          <table v-if="(detail.orders || []).length" class="data">
-            <thead>
-              <tr><th>单号</th><th>课程</th><th>金额</th><th>状态</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="o in detail.orders" :key="o.id">
-                <td>{{ o.external_order_no || o.id }}</td>
-                <td>{{ o.title }}</td>
-                <td>{{ o.amount ?? '—' }}</td>
-                <td>{{ o.status }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <p class="mb-2 mt-4 text-xs font-semibold text-muted">订单</p>
+          <div v-if="(detail.orders || []).length" class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead class="border-b border-line text-muted">
+                <tr>
+                  <th class="pb-2 pr-3 font-medium">单号</th>
+                  <th class="pb-2 pr-3 font-medium">课程</th>
+                  <th class="pb-2 pr-3 font-medium">金额</th>
+                  <th class="pb-2 font-medium">状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="o in detail.orders"
+                  :key="o.id"
+                  class="border-b border-line/60 hover:bg-fjord-soft/40"
+                >
+                  <td class="py-2 pr-3">{{ o.external_order_no || o.id }}</td>
+                  <td class="py-2 pr-3">{{ o.title }}</td>
+                  <td class="py-2 pr-3">{{ o.amount ?? '—' }}</td>
+                  <td class="py-2">{{ o.status }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <EmptyState v-else title="暂无订单" hint="可在「订单」页新建。" />
 
-          <p class="sec-label">沟通时间线（近 30 条）</p>
-          <ul v-if="messages.length" class="timeline">
+          <p class="mb-2 mt-4 text-xs font-semibold text-muted">沟通时间线（近 30 条）</p>
+          <ul v-if="messages.length" class="max-h-[420px] list-none overflow-auto p-0">
             <li
               v-for="m in messages"
               :key="m.id"
-              :class="m.direction === 'out' ? 'out' : 'in'"
+              class="grid gap-0.5 border-b border-line/60 py-2 text-sm"
             >
-              <span class="dir">{{ m.direction === 'out' ? '顾问' : '家长' }}</span>
-              <span class="body">{{ m.content || '—' }}</span>
-              <span v-if="m.msg_time" class="time">{{ m.msg_time.replace('T', ' ').replace('Z', '') }}</span>
+              <span
+                class="text-[11px]"
+                :class="m.direction === 'out' ? 'text-fjord' : 'text-muted'"
+              >
+                {{ m.direction === 'out' ? '顾问' : '家长' }}
+              </span>
+              <span>{{ m.content || '—' }}</span>
+              <span v-if="m.msg_time" class="text-[11px] text-muted">
+                {{ m.msg_time.replace('T', ' ').replace('Z', '') }}
+              </span>
             </li>
           </ul>
           <EmptyState v-else title="暂无沟通记录" />
@@ -342,108 +465,3 @@ onMounted(async () => {
     </template>
   </div>
 </template>
-
-<style scoped>
-.back { margin-bottom: 10px; }
-.hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-.hero h2 { margin: 0; font-size: 1.2rem; font-family: var(--font-display); }
-.meta { margin: 6px 0 0; }
-.hero-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.form {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-  max-width: 560px;
-}
-.form label {
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--muted);
-}
-.form input,
-.form select,
-.form textarea,
-.cs {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 8px;
-  color: var(--ink);
-  width: 100%;
-  font: inherit;
-}
-.cs-btn { margin-top: 6px; }
-.split {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(300px, 1.1fr);
-  gap: 12px;
-  margin-top: 12px;
-  align-items: start;
-}
-.col h3 { margin: 0 0 8px; font-size: 1rem; }
-.sec-label {
-  margin: 14px 0 6px;
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 600;
-}
-.sec-label:first-of-type { margin-top: 0; }
-.block { margin-bottom: 10px; }
-.block.draft {
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--ai-soft);
-}
-.row {
-  display: flex;
-  gap: 8px;
-  font-size: 13px;
-  margin: 3px 0;
-}
-.k { color: var(--muted); min-width: 64px; flex-shrink: 0; }
-.v { flex: 1; word-break: break-word; }
-.summary {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: 6px;
-  padding: 2px 8px;
-  font-size: 12px;
-}
-.timeline {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 420px;
-  overflow: auto;
-}
-.timeline li {
-  display: grid;
-  gap: 2px;
-  padding: 8px 0;
-  border-bottom: 1px solid #eef2f6;
-  font-size: 13px;
-}
-.timeline .dir {
-  font-size: 11px;
-  color: var(--muted);
-}
-.timeline li.out .dir { color: var(--accent); }
-.timeline .time { font-size: 11px; color: var(--muted); }
-.muted { color: var(--muted); }
-@media (max-width: 800px) {
-  .split { grid-template-columns: 1fr; }
-}
-</style>

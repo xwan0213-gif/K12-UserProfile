@@ -5,77 +5,37 @@ const { toasts, dismiss } = useToast()
 </script>
 
 <template>
-  <div class="toast-host" aria-live="polite">
-    <TransitionGroup name="toast">
+  <div
+    class="pointer-events-none fixed bottom-4 right-4 z-[80] flex max-w-[min(360px,calc(100vw-24px))] flex-col gap-2"
+    aria-live="polite"
+  >
+    <TransitionGroup
+      enter-active-class="transition duration-[180ms] ease-out"
+      leave-active-class="transition duration-[180ms] ease-out"
+      enter-from-class="translate-y-2 opacity-0"
+      leave-to-class="translate-y-2 opacity-0"
+    >
       <div
         v-for="t in toasts"
         :key="t.id"
-        class="toast"
-        :data-kind="t.kind"
+        class="pointer-events-auto flex items-start gap-2 rounded-panel border border-line bg-white px-3 py-2.5 text-[13px] leading-snug text-ink shadow-[0_8px_24px_rgba(26,35,50,0.12)]"
+        :class="{
+          'border-teal-200 bg-teal-50': t.kind === 'ok',
+          'border-orange-200 bg-orange-50': t.kind === 'warn',
+          'border-red-200 bg-red-50': t.kind === 'err',
+        }"
         role="status"
       >
-        <span class="msg">{{ t.message }}</span>
-        <button type="button" class="x" aria-label="关闭" @click="dismiss(t.id)">×</button>
+        <span class="min-w-0 flex-1 break-words">{{ t.message }}</span>
+        <button
+          type="button"
+          class="cursor-pointer border-none bg-transparent px-0.5 text-base leading-none text-muted"
+          aria-label="关闭"
+          @click="dismiss(t.id)"
+        >
+          ×
+        </button>
       </div>
     </TransitionGroup>
   </div>
 </template>
-
-<style scoped>
-.toast-host {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 80;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: min(360px, calc(100vw - 24px));
-  pointer-events: none;
-}
-.toast {
-  pointer-events: auto;
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  box-shadow: 0 8px 24px rgba(26, 35, 50, 0.12);
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--ink);
-}
-.toast[data-kind='ok'] {
-  border-color: #99f6e4;
-  background: #f0fdfa;
-}
-.toast[data-kind='warn'] {
-  border-color: #fed7aa;
-  background: var(--warn-soft);
-}
-.toast[data-kind='err'] {
-  border-color: #fecaca;
-  background: var(--danger-soft);
-}
-.msg { flex: 1; min-width: 0; word-break: break-word; }
-.x {
-  border: none;
-  background: transparent;
-  padding: 0 2px;
-  line-height: 1;
-  font-size: 16px;
-  color: var(--muted);
-  cursor: pointer;
-}
-.toast-enter-active,
-.toast-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
-}
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
-}
-</style>

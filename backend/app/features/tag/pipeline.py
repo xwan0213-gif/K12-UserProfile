@@ -169,6 +169,19 @@ async def run_tag_recommend_pipeline(
         db.add(suggestion)
         await db.flush()
 
+        old_rows = (
+            await db.execute(
+                select(Suggestion).where(
+                    Suggestion.customer_id == customer_id,
+                    Suggestion.type == "tag",
+                    Suggestion.id != suggestion.id,
+                    Suggestion.status.in_(("pending", "shown")),
+                )
+            )
+        ).scalars().all()
+        for old in old_rows:
+            old.status = "superseded"
+
         await job_svc.mark_success(
             db, job, result_ref_type="suggestion", result_ref_id=suggestion.id
         )

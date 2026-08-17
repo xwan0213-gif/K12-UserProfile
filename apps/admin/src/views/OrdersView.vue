@@ -1,21 +1,28 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
+import { Pencil, Plus, Save, Trash2, X } from '@lucide/vue'
 import EmptyState from '../components/EmptyState.vue'
+import FlashBanner from '../components/FlashBanner.vue'
 import PaginationBar from '../components/PaginationBar.vue'
+import UiIcon from '../components/UiIcon.vue'
+import { useFlash } from '../composables/useFlash'
 import { useAuth } from '../composables/useAuth'
 import { canWriteOrders } from '../nav'
 
 const { api, role } = useAuth()
+const flash = useFlash()
 const orders = ref<any>(null)
 const customers = ref<any[]>([])
 const error = ref('')
-const flash = ref('')
 const loading = ref(true)
+const busy = ref(false)
 const status = ref('')
 const page = ref(1)
 const pageSize = 20
 const writable = canWriteOrders(role.value)
 const showCreate = ref(false)
+const customerKeyword = ref('')
 
 const form = ref({
   customer_id: '' as string | number | '',
@@ -43,12 +50,22 @@ function statusLabel(s?: string) {
   return statusOptions.find((x) => x.value === s)?.label || s || '—'
 }
 
+function formatDateTime(iso?: string | null) {
+  if (!iso) return '—'
+  return iso.replace('T', ' ').replace('Z', '').slice(0, 16)
+}
+
 async function loadCustomers() {
+  busy.value = true
   try {
-    const data = await api('/admin/customers?page=1&page_size=100')
+    const qs = new URLSearchParams({ page: '1', page_size: '50' })
+    if (customerKeyword.value.trim()) qs.set('keyword', customerKeyword.value.trim())
+    const data = await api(`/admin/customers?${qs}`)
     customers.value = data?.items || []
   } catch {
     customers.value = []
+  } finally {
+    busy.value = false
   }
 }
 
@@ -70,7 +87,15 @@ async function load() {
 }
 
 async function createOrder() {
-  if (form.value.customer_id === '' || !form.value.title.trim()) return
+  if (form.value.customer_id === '') {
+    flash.err('请选择客户')
+    return
+  }
+  if (!form.value.title.trim()) {
+    flash.err('请填写课程/标题')
+    return
+  }
+  busy.value = true
   try {
     await api('/admin/orders', {
       method: 'POST',
@@ -82,7 +107,7 @@ async function createOrder() {
         status: form.value.status,
       }),
     })
-    flash.value = '订单已创建'
+    flash.ok('订单已创建')
     showCreate.value = false
     form.value = {
       customer_id: '',
@@ -93,7 +118,9 @@ async function createOrder() {
     }
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '创建失败'
+    flash.err(e?.message || '创建失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -109,6 +136,11 @@ function startEdit(o: any) {
 
 async function saveEdit() {
   if (editingId.value == null) return
+  if (!editForm.value.title.trim()) {
+    flash.err('请填写课程/标题')
+    return
+  }
+  busy.value = true
   try {
     await api(`/admin/orders/${editingId.value}`, {
       method: 'PATCH',
@@ -120,21 +152,28 @@ async function saveEdit() {
       }),
     })
     editingId.value = null
-    flash.value = '订单已更新'
+    flash.ok('订单已更新')
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '更新失败'
+    flash.err(e?.message || '更新失败')
+  } finally {
+    busy.value = false
   }
 }
 
-async function removeOrder(id: number) {
-  if (!window.confirm('确认删除该订单记录？')) return
+async function removeOrder(o: any) {
+  const label = o.external_order_no || o.title || `#${o.id}`
+  if (!window.confirm(`确认删除订单「${label}」？此操作不可恢复。`)) return
+  busy.value = true
   try {
-    await api(`/admin/orders/${id}`, { method: 'DELETE' })
-    flash.value = '订单已删除'
+    await api(`/admin/orders/${o.id}`, { method: 'DELETE' })
+    flash.ok('订单已删除')
+    editingId.value = null
     await load()
   } catch (e: any) {
-    flash.value = e?.message || '删除失败'
+    flash.err(e?.message || '删除失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -154,97 +193,246 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="card">
-    <div class="head">
-      <h2>订单</h2>
-      <div class="actions">
-        <form class="search" @submit.prevent="onSearch">
-          <select v-model="status">
+  <section class="rounded-panel border border-line bg-white p-5 shadow-soft">
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="font-display text-lg font-semibold">订单</h2>
+        <p class="mt-1 text-sm text-muted">按状态筛选；可新建、编辑状态或删除记录。</p>
+        <FlashBanner class="mt-2" :message="flash.state.message" :kind="flash.state.kind" />
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <form class="flex flex-wrap items-center gap-2" @submit.prevent="onSearch">
+          <select v-model="status" class="rounded-control border border-line px-2.5 py-1.5 text-sm">
             <option value="">全部状态</option>
             <option v-for="s in statusOptions" :key="s.value" :value="s.value">
               {{ s.label }}
             </option>
           </select>
-          <button type="submit" class="primary">筛选</button>
+          <button
+            type="submit"
+            class="rounded-control border border-line bg-white px-3 py-1.5 text-sm text-ink hover:bg-stone-50 disabled:opacity-50"
+          >
+            筛选
+          </button>
         </form>
-        <button v-if="writable" type="button" class="primary" @click="showCreate = !showCreate">
+        <button
+          v-if="writable"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+          @click="showCreate = !showCreate"
+        >
+          <UiIcon :icon="showCreate ? X : Plus" :size="14" />
           {{ showCreate ? '收起' : '新建订单' }}
         </button>
       </div>
     </div>
-    <p v-if="flash" class="muted">{{ flash }}</p>
 
-    <form v-if="showCreate && writable" class="form" @submit.prevent="createOrder">
-      <strong>新建订单</strong>
-      <label>
+    <form
+      v-if="showCreate && writable"
+      class="mb-4 grid max-w-md gap-3 rounded-panel border border-line bg-stone-50 p-4"
+      @submit.prevent="createOrder"
+    >
+      <strong class="text-sm">新建订单</strong>
+      <label class="grid gap-1 text-sm text-muted">
+        搜索客户
+        <div class="flex gap-2">
+          <input
+            v-model="customerKeyword"
+            placeholder="家长/学员关键词…"
+            class="min-w-0 flex-1 rounded-control border border-line px-2.5 py-1.5 text-ink"
+          />
+          <button
+            type="button"
+            :disabled="busy"
+            class="shrink-0 rounded-control border border-line bg-white px-3 py-1.5 text-sm text-ink hover:bg-stone-50 disabled:opacity-50"
+            @click="loadCustomers"
+          >
+            搜索
+          </button>
+        </div>
+      </label>
+      <label class="grid gap-1 text-sm text-muted">
         客户
-        <select v-model="form.customer_id" required>
+        <select
+          v-model="form.customer_id"
+          required
+          class="rounded-control border border-line px-2.5 py-1.5 text-ink"
+        >
           <option disabled value="">请选择</option>
           <option v-for="c in customers" :key="c.id" :value="c.id">
             #{{ c.id }} {{ c.parent_name }}/{{ c.student_name || '—' }}
           </option>
         </select>
       </label>
-      <label>课程/标题 <input v-model="form.title" required /></label>
-      <label>金额 <input v-model.number="form.amount" type="number" min="0" step="0.01" /></label>
-      <label>外部单号 <input v-model="form.external_order_no" placeholder="可选" /></label>
-      <label>
+      <label class="grid gap-1 text-sm text-muted">
+        课程/标题
+        <input v-model="form.title" required class="rounded-control border border-line px-2.5 py-1.5 text-ink" />
+      </label>
+      <label class="grid gap-1 text-sm text-muted">
+        金额
+        <input
+          v-model.number="form.amount"
+          type="number"
+          min="0"
+          step="0.01"
+          class="rounded-control border border-line px-2.5 py-1.5 text-ink"
+        />
+      </label>
+      <label class="grid gap-1 text-sm text-muted">
+        外部单号
+        <input
+          v-model="form.external_order_no"
+          placeholder="可选"
+          class="rounded-control border border-line px-2.5 py-1.5 text-ink"
+        />
+      </label>
+      <label class="grid gap-1 text-sm text-muted">
         状态
-        <select v-model="form.status">
+        <select v-model="form.status" class="rounded-control border border-line px-2.5 py-1.5 text-ink">
           <option v-for="s in statusOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
         </select>
       </label>
-      <button type="submit" class="primary">创建</button>
+      <button
+        type="submit"
+        :disabled="busy"
+        class="inline-flex w-fit items-center gap-1.5 rounded-control bg-fjord px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+      >
+        <UiIcon :icon="Plus" :size="14" />
+        {{ busy ? '创建中…' : '创建' }}
+      </button>
     </form>
 
-    <p v-if="loading" class="muted">加载中…</p>
+    <p v-if="loading" class="text-sm text-muted">加载中…</p>
     <EmptyState v-else-if="error" :title="error" />
-    <EmptyState v-else-if="!(orders?.items || []).length" title="暂无订单" hint="可新建订单，或先有客户后再录单。" />
+    <EmptyState
+      v-else-if="!(orders?.items || []).length"
+      title="暂无订单"
+      hint="可新建订单，或先有客户后再录单。"
+    />
     <template v-else>
-      <table class="data">
-        <thead>
-          <tr>
-            <th>单号</th>
-            <th>客户</th>
-            <th>课程</th>
-            <th>金额</th>
-            <th>状态</th>
-            <th v-if="writable"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="o in orders.items" :key="o.id">
-            <template v-if="editingId === o.id">
-              <td><input v-model="editForm.external_order_no" /></td>
-              <td>{{ o.parent_name }}</td>
-              <td><input v-model="editForm.title" /></td>
-              <td><input v-model.number="editForm.amount" type="number" step="0.01" /></td>
-              <td>
-                <select v-model="editForm.status">
-                  <option v-for="s in statusOptions" :key="s.value" :value="s.value">
-                    {{ s.label }}
-                  </option>
-                </select>
-              </td>
-              <td class="row-actions">
-                <button type="button" class="primary" @click="saveEdit">保存</button>
-                <button type="button" @click="editingId = null">取消</button>
-              </td>
-            </template>
-            <template v-else>
-              <td>{{ o.external_order_no || o.id }}</td>
-              <td>{{ o.parent_name }}</td>
-              <td>{{ o.title }}</td>
-              <td>{{ o.amount }}</td>
-              <td>{{ statusLabel(o.status) }}</td>
-              <td v-if="writable" class="row-actions">
-                <button type="button" @click="startEdit(o)">改</button>
-                <button type="button" @click="removeOrder(o.id)">删</button>
-              </td>
-            </template>
-          </tr>
-        </tbody>
-      </table>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-line text-muted">
+            <tr>
+              <th class="pb-2 pr-3 font-medium">单号</th>
+              <th class="pb-2 pr-3 font-medium">客户</th>
+              <th class="pb-2 pr-3 font-medium">课程</th>
+              <th class="pb-2 pr-3 font-medium">金额</th>
+              <th class="pb-2 pr-3 font-medium">状态</th>
+              <th class="pb-2 pr-3 font-medium">支付时间</th>
+              <th v-if="writable" class="pb-2 font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="o in orders.items"
+              :key="o.id"
+              class="border-b border-line/60 hover:bg-fjord-soft/40"
+            >
+              <template v-if="editingId === o.id">
+                <td class="py-2 pr-3">
+                  <input
+                    v-model="editForm.external_order_no"
+                    class="w-full rounded-control border border-line px-2 py-1 text-sm"
+                  />
+                </td>
+                <td class="py-2 pr-3">
+                  <RouterLink
+                    v-if="o.customer_id"
+                    :to="`/customers/${o.customer_id}`"
+                    class="text-fjord hover:underline"
+                  >
+                    {{ o.parent_name }}
+                  </RouterLink>
+                  <span v-else>{{ o.parent_name }}</span>
+                </td>
+                <td class="py-2 pr-3">
+                  <input v-model="editForm.title" class="w-full rounded-control border border-line px-2 py-1 text-sm" />
+                </td>
+                <td class="py-2 pr-3">
+                  <input
+                    v-model.number="editForm.amount"
+                    type="number"
+                    step="0.01"
+                    class="w-full rounded-control border border-line px-2 py-1 text-sm"
+                  />
+                </td>
+                <td class="py-2 pr-3">
+                  <select v-model="editForm.status" class="rounded-control border border-line px-2 py-1 text-sm">
+                    <option v-for="s in statusOptions" :key="s.value" :value="s.value">
+                      {{ s.label }}
+                    </option>
+                  </select>
+                </td>
+                <td class="py-2 pr-3 text-muted">{{ formatDateTime(o.paid_at) }}</td>
+                <td class="py-2">
+                  <div class="flex flex-wrap justify-end gap-1.5">
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control bg-fjord px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                      @click="saveEdit"
+                    >
+                      <UiIcon :icon="Save" :size="14" />
+                      {{ busy ? '保存中…' : '保存' }}
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-ink hover:bg-stone-50 disabled:opacity-50"
+                      @click="editingId = null"
+                    >
+                      <UiIcon :icon="X" :size="14" />
+                      取消
+                    </button>
+                  </div>
+                </td>
+              </template>
+              <template v-else>
+                <td class="py-2 pr-3">{{ o.external_order_no || o.id }}</td>
+                <td class="py-2 pr-3">
+                  <RouterLink
+                    v-if="o.customer_id"
+                    :to="`/customers/${o.customer_id}`"
+                    class="text-fjord hover:underline"
+                  >
+                    {{ o.parent_name }}
+                  </RouterLink>
+                  <span v-else>{{ o.parent_name }}</span>
+                </td>
+                <td class="py-2 pr-3">{{ o.title }}</td>
+                <td class="py-2 pr-3">{{ o.amount }}</td>
+                <td class="py-2 pr-3">{{ statusLabel(o.status) }}</td>
+                <td class="py-2 pr-3 text-muted">{{ formatDateTime(o.paid_at) }}</td>
+                <td v-if="writable" class="py-2">
+                  <div class="flex flex-wrap justify-end gap-1.5">
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-ink hover:bg-stone-50 disabled:opacity-50"
+                      :aria-label="`编辑订单 ${o.external_order_no || o.title || o.id}`"
+                      @click="startEdit(o)"
+                    >
+                      <UiIcon :icon="Pencil" :size="14" />
+                      编辑
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="busy"
+                      class="inline-flex items-center gap-1 rounded-control border border-line bg-white px-2.5 py-1 text-xs text-danger hover:bg-stone-50 disabled:opacity-50"
+                      :aria-label="`删除订单 ${o.external_order_no || o.title || o.id}`"
+                      @click="removeOrder(o)"
+                    >
+                      <UiIcon :icon="Trash2" :size="14" />
+                      删除
+                    </button>
+                  </div>
+                </td>
+              </template>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <PaginationBar
         :page="page"
         :page-size="pageSize"
@@ -254,58 +442,3 @@ onMounted(async () => {
     </template>
   </section>
 </template>
-
-<style scoped>
-.head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-h2 { margin: 0; font-size: 1.05rem; }
-.actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.search {
-  display: flex;
-  gap: 6px;
-}
-.search select,
-.form input,
-.form select,
-td input,
-td select {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 10px;
-  color: var(--ink);
-  width: 100%;
-}
-.form {
-  display: grid;
-  gap: 8px;
-  max-width: 480px;
-  margin-bottom: 14px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fafbfc;
-}
-.form label {
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--muted);
-}
-.row-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.muted { color: var(--muted); }
-</style>
